@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+*.db
+*.sqlite
+*.sqlite3
+outputs/
+data/*.pkl
+data/*.csv
+.vscode/
+.DS_Store
