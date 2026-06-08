@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+import config
+from twinmarket_kr.agents.news_agent import prepare_news
+
+
+def main() -> None:
+    processed_count, selected_count = prepare_news(
+        config.SAMSUNG_NEWS_RAW_PKL,
+        config.PROCESSED_NEWS_CSV,
+        config.DAILY_NEWS_SELECTION_CSV,
+    )
+    print(f"processed={processed_count}, daily_selected={selected_count}")
+    print(f"processed_csv={config.PROCESSED_NEWS_CSV}")
+    print(f"daily_csv={config.DAILY_NEWS_SELECTION_CSV}")
+
+
+if __name__ == "__main__":
+    main()
