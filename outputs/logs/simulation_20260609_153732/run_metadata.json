@@ -1,0 +1,19 @@
+{
+  "run_id": "simulation_20260609_153732",
+  "created_at": "20260609_153732",
+  "max_agents": 5,
+  "max_days": 5,
+  "concurrency": 5,
+  "agent_count": 5,
+  "date_count": 5,
+  "sim_db": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/outputs/sim.db",
+  "random_agents": true,
+  "random_seed": 2,
+  "agent_ids": [
+    "A008",
+    "A011",
+    "A012",
+    "A022",
+    "A047"
+  ]
+}

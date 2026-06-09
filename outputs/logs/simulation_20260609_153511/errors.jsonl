@@ -1,0 +1,1 @@
+{"run_id": "simulation_20260609_153511", "event": "agent_error", "date": "2025-01-02", "turn": 1, "agent_id": "A047", "error_type": "AttributeError", "error": "'str' object has no attribute 'choices'"}
