@@ -378,6 +378,72 @@ Step 0 (스캐폴딩)
 
 *(아직 코드 미착수 — Step 0부터 시작. 완료 노트는 여기에 누적한다.)*
 
+### ✅ Step 0 완료 (2026-06-02)
+- 수행한 것: `twinmarket_kr_project` 아래 프로젝트 구조를 만들고 `.env.example`, `.gitignore`, `requirements.txt`, `config.py`, DB 스키마/커넥션 헬퍼, OpenRouter async 클라이언트 골격을 생성했다. `outputs/sim.db`에 `belief_history`, `portfolio_state`, `trade_log`, `StockData`, `TradingDetails` 테이블을 생성해 확인했다.
+- 핵심 판단: `python-dotenv`가 설치되지 않은 기본 환경에서도 검증할 수 있도록 `.env` 로딩은 optional fallback으로 처리했다. 실제 의존성은 `requirements.txt`에 유지한다.
+- 발견한 문제: 로컬 기본 Python에는 `python-dotenv`가 없었다. OpenRouter ping은 API key가 없는 상태라 실행하지 않았다.
+- 다음 Step 준비: `scripts/01_build_persona.py`로 persona 선발을 실행할 수 있다.
+
+### ✅ Step 1 완료 (2026-06-02)
+- 수행한 것: Persona 설계에 따라 고정 슬롯 로더/자동 생성, 14개 세그먼트, 한자값 매핑, 가중 선발, location/depth/persona_prompt 생성, `outputs/sys_100.db` 저장, 검증 리포트 생성을 구현했다. `data/sys_1000.csv` 입력으로 100명 `agents` 테이블을 생성했다.
+- 핵심 판단: 제공 입력이 DB가 아니라 CSV이므로 `load_pool()`이 DB/CSV를 모두 지원하도록 했다. `fixed_slots.csv`는 설계 문서의 100개 슬롯에서 자동 생성한다. `news_depth`는 agents 컬럼에 저장했다.
+- 발견한 문제: 첨부 `sys_1000.csv`는 이름과 달리 100명만 포함한다. 따라서 100명 전원을 100개 슬롯에 1회씩 배정해야 하며, 시드 선택이 세그먼트 coherence에 영향을 준다. 시드 2에서 젊은 남성 turnover 평균 2.2, 고령층 1.917로 검증 방향성을 만족했다.
+- 다음 Step 준비: 다음 작업은 Step 2 Memory Agent 구현이다. `outputs/sys_100.db`와 `outputs/persona_validation_report.json`을 기준 입력으로 사용하면 된다.
+
+### 🔁 Step 1 재실행 (2026-06-02)
+- 수행한 것: 사용자가 수정한 `/Users/leeyujeong/Downloads/MD_File/sys_1000.csv`를 `data/sys_1000.csv`로 갱신하고 `scripts/01_build_persona.py`를 다시 실행해 `outputs/sys_100.db`를 재생성했다.
+- 핵심 판단: 새 CSV는 헤더 포함 1001줄로 1000명 pool이 맞다. 기존 CSV/DB 겸용 로더와 동일한 시드 2를 사용했다.
+- 발견한 문제: 없음. 최종 agents 100명, distinct source_user_id 100명, 성별/연령/자산 분포 편차 0, prompt 오류 0.
+- 다음 Step 준비: Step 2는 재생성된 `outputs/sys_100.db`를 그대로 사용하면 된다.
+
+### ✅ Step 2 완료 (2026-06-02)
+- 수행한 것: `twinmarket_kr/agents/memory_agent.py`와 `scripts/02_init_memory.py`를 구현했다. `save_belief`, `get_previous_belief`, `init_portfolio_t000`, `update_portfolio`, `append_trade_log`, `get_last_action_reason`, `get_portfolio_summary`를 DB 왕복으로 검증했다. 현재 `outputs/sim.db`에는 turn=0 portfolio_state 100개가 있다.
+- 핵심 판단: 포지션은 설계의 JSON 배열 구조를 유지하고, 체결 업데이트는 fill 리스트를 받아 평균단가/현금/실현손익/미실현손익을 계산한다.
+- 발견한 문제: 병렬 검증 중 초기화와 업데이트가 동시에 실행되어 한 번 race가 발생했다. 이후 순차 실행으로 정상 확인했다.
+- 다음 Step 준비: Step 8 context 조립에서 MemoryAgent를 그대로 사용할 수 있다.
+
+### ✅ Step 3 코드 완료 (2026-06-02)
+- 수행한 것: `twinmarket_kr/agents/fundamental_agent.py`와 `scripts/03_load_stock_data.py`를 구현했다. CSV 컬럼 탐지, `StockData` 적재, `ma5`, `ma20`, `pct_chg`, `volume_chg`, `volatility_20d` 파생 계산을 임시 fixture로 검증했다.
+- 핵심 판단: 실제 파일 컬럼명이 설계와 다를 수 있어 date/close/volume/ma 계열 후보명을 탐지한다. `StockData`에 `volume_chg` 컬럼을 추가했다.
+- 발견한 문제: 현재 `data/stock_data.csv`가 없어 실제 삼성전자 데이터 적재 검증은 대기 중이다.
+- 다음 Step 준비: `data/stock_data.csv`가 들어오면 `python3 scripts/03_load_stock_data.py`를 실행한다.
+
+### ✅ Step 5 완료 (2026-06-02)
+- 수행한 것: `twinmarket_kr/agents/exchange_agent.py`를 구현했다. Phase 1 개별가 체결, Phase 2/3 실가격 앵커 집합경매, 서킷브레이커, 시장가 처리, INSTITUTIONAL one-shot injection, `TradingDetails` 저장 함수를 추가했다.
+- 핵심 판단: 빈 주문일에도 `real_prices`에 있는 종목 결과를 반환하도록 구현했다.
+- 발견한 문제: 없음. fixture 검증에서 매수 우세 시 INSTITUTIONAL sell 11주 주입, 빈 주문 volume=0, Phase1 day1 buy-only 처리를 확인했다.
+- 다음 Step 준비: Step 9에서 일별 주문 묶음을 이 모듈로 넘기면 된다.
+
+### ✅ Step 4 코드 완료 (2026-06-02)
+- 수행한 것: `twinmarket_kr/agents/news_agent.py`와 `scripts/02_prepare_news.py`를 구현했다. pkl 원본 전처리, `processed_news.csv`, `daily_news_selection.csv`, `read_news`, `search_news`, 일일 제목 context를 임시 fixture로 검증했다.
+- 핵심 판단: 카테고리는 `종목/섹터/경제`로 정규화하고, `산업`은 설계상 섹터로 처리한다. 중요도는 키워드/카테고리/제목 신호 기반 휴리스틱이다.
+- 발견한 문제: 현재 `data/samsung_news_raw.pkl`이 없어 실제 뉴스 전처리는 대기 중이다.
+- 다음 Step 준비: pkl 제공 후 `python3 scripts/02_prepare_news.py`를 실행한다.
+
+### ✅ Step 6 코드 완료 + offline initial 생성 (2026-06-02)
+- 수행한 것: `prompts/initial_belief.txt`, `prompts/update_belief.txt`, `twinmarket_kr/llm/belief.py`, `scripts/04_generate_initial_beliefs.py`를 구현했다. 현재 API 없이 offline 모드로 turn=0 initial belief 100개를 `outputs/sim.db`에 저장했다.
+- 핵심 판단: 정식 LLM 생성과 별개로, API 키가 없을 때 파이프라인 검증을 위한 offline 템플릿 모드를 둔다.
+- 발견한 문제: 현재 환경에는 `openai` 패키지와 API 키가 없어 실제 LLM 호출 검증은 대기 중이다.
+- 다음 Step 준비: `.env` 설정과 `pip install -r requirements.txt` 후 offline 없이 초기 belief를 재생성할 수 있다.
+
+### ✅ Step 7 코드 완료 (2026-06-02)
+- 수행한 것: `prompts/make_decision.txt`, `twinmarket_kr/llm/decision.py`를 구현했다. 거래 제약 빌더와 JSON 파서에서 현금/보유수량/최소주문단위 초과를 방지한다.
+- 핵심 판단: LLM 출력이 제약을 어겨도 파서 단계에서 buy/sell 수량을 클램프하고 불가능한 주문은 hold로 변환한다.
+- 발견한 문제: 실제 LLM 호출 검증은 API 키/패키지 설치 후 가능하다.
+- 다음 Step 준비: Step 8 `daily_cycle`에서 이 모듈을 호출한다.
+
+### ✅ Step 8 코드 완료 (2026-06-02)
+- 수행한 것: `core/collect_context.py`, `core/daily_cycle.py`를 구현했다. Memory/Fundamental/News를 묶어 Overall §6의 `today_context` 구조를 만들고, belief update → decision → order 반환까지 연결했다.
+- 핵심 판단: 뉴스 tool-calling 자율 탐색은 LLM 통합 단계에서 확장하고, 현재 `NewsAgent.build_base_context()`는 일일 제목 10개와 빈 read contents를 반환한다.
+- 발견한 문제: 실제 단일 에이전트 end-to-end는 `StockData`, 뉴스 CSV, OpenRouter 설정이 모두 있어야 실행 가능하다.
+- 다음 Step 준비: 데이터와 API 설정 후 smoke run을 진행한다.
+
+### ✅ Step 9/10 골격 완료 (2026-06-02)
+- 수행한 것: `twinmarket_kr/simulation.py`, `scripts/05_run_simulation.py`, `scripts/99_validate.py`를 구현했다. validate 결과 현재 agents 100, persona pass true, portfolio_state 100, belief_history 100, stock/trade 데이터 0을 확인했다.
+- 핵심 판단: 시뮬레이션은 `StockData` 날짜를 기준으로 루프를 돌며, async concurrency 상한을 둔다.
+- 발견한 문제: 실제 smoke/full run은 `stock_data.csv`, 뉴스 전처리 결과, OpenRouter 설정이 없어 아직 실행하지 않았다.
+- 다음 Step 준비: 누락 입력 파일과 `.env`가 준비되면 `scripts/03_load_stock_data.py`, `scripts/02_prepare_news.py`, `scripts/04_generate_initial_beliefs.py`, `scripts/05_run_simulation.py --max-agents 5 --max-days 3` 순서로 smoke를 수행한다.
+
 ---
 
 *작성 기준: Overall_Framework_Design.md / Persona_Distribution_Design.md / News_System_Design.md / Matching_System_Design.md*
