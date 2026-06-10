@@ -72,7 +72,11 @@ SIM_DDLS = [
         trade_value REAL,
         fee REAL NOT NULL,
         action_reason TEXT,
-        risk_control TEXT
+        risk_control TEXT,
+        order_type TEXT,
+        submitted_price REAL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        filled_quantity INTEGER NOT NULL DEFAULT 0
     );
     """,
     """

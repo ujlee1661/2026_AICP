@@ -120,6 +120,13 @@ def assign_news_depth(index: int, total: int) -> int:
     return 2 if index >= total - n_depth2 else 1
 
 
+def assign_depth0_agents(agents: list[dict], rng: random.Random) -> None:
+    depth1_agents = [agent for agent in agents if int(agent["news_depth"]) == 1]
+    count = min(config.NEWS_DEPTH0_COUNT, len(depth1_agents))
+    for agent in rng.sample(depth1_agents, count):
+        agent["news_depth"] = 0
+
+
 def generate_persona_prompt(agent: dict) -> str:
     disposition_desc = {
         "high": "수익이 나면 빠르게 매도하고 손실 시 추가 매수하는 경향이 강합니다",
@@ -160,11 +167,12 @@ def generate_persona_prompt(agent: dict) -> str:
         "big_influencer": "영향력이 큰 투자 인플루언서",
     }
     gender_ko = "남성" if agent["gender"] == "male" else "여성"
-    depth_line = (
-        "뉴스는 제목을 먼저 확인하고 필요하면 일부 본문을 읽는 기본형입니다."
-        if agent["news_depth"] == 1
-        else "뉴스를 능동적으로 읽고 필요하면 최근 7일 뉴스까지 추가 검색하는 심층 탐색형입니다."
-    )
+    depth_desc = {
+        0: "뉴스는 당일 헤드라인만 훑고 세부 요약은 확인하지 않는 헤드라인 스캔형입니다.",
+        1: "뉴스는 당일 헤드라인과 10개 요약본을 모두 확인하는 요약 전독형입니다.",
+        2: "뉴스는 당일 헤드라인과 요약본을 확인한 뒤 필요하면 최근 7일 뉴스까지 추가 검색하는 심층 탐색형입니다.",
+    }
+    depth_line = depth_desc.get(int(agent["news_depth"]), depth_desc[1])
     return (
         "당신은 한국의 삼성전자 개인투자자입니다.\n"
         f"성별은 {gender_ko}, 나이는 {agent['age']}세, 거주 지역은 {agent['location']}입니다.\n"
@@ -208,6 +216,10 @@ def match_agents(pool: list[dict], slots: list[dict], seed: int = config.RANDOM_
         chosen["persona_prompt"] = generate_persona_prompt(chosen)
         used_source_ids.add(chosen["source_user_id"])
         selected.append(chosen)
+
+    assign_depth0_agents(selected, rng)
+    for agent in selected:
+        agent["persona_prompt"] = generate_persona_prompt(agent)
 
     return selected
 

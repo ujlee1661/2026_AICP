@@ -40,18 +40,17 @@ def daily_news_quota_stats(path: Path) -> dict[str, object]:
     with path.open(encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f):
             by_day[row["date"]][row.get("category", "")] += 1
-    violations = [
+    violations = [date for date, counts in by_day.items() if sum(counts.values()) > 10]
+    category_overflows = [
         date
         for date, counts in by_day.items()
-        if sum(counts.values()) > 10
-        or counts.get("종목", 0) > 5
-        or counts.get("섹터", 0) > 3
-        or counts.get("경제", 0) > 2
+        if counts.get("종목", 0) > 5 or counts.get("섹터", 0) > 3 or counts.get("경제", 0) > 2
     ]
     short_days = [date for date, counts in by_day.items() if sum(counts.values()) < 10]
     return {
         "days": len(by_day),
         "quota_violations": len(violations),
+        "category_backfill_days": len(category_overflows),
         "short_days": len(short_days),
         "sample_violations": violations[:5],
     }

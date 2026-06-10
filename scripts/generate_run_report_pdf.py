@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+import sqlite3
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -27,9 +28,10 @@ from reportlab.platypus import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-RUN_DIR = PROJECT_ROOT / "outputs" / "logs" / "simulation_20260609_154102"
+RUN_DIR = PROJECT_ROOT / "outputs" / "logs" / "current"
 REPORT_DIR = PROJECT_ROOT / "outputs" / "reports"
-REPORT_PATH = REPORT_DIR / "simulation_20260609_154102_report.pdf"
+REPORT_PATH = REPORT_DIR / "current_report.pdf"
+SYS_100_DB = PROJECT_ROOT / "outputs" / "sys_100.db"
 FONT_PATHS = [
     Path("/System/Library/Fonts/Supplemental/AppleGothic.ttf"),
     Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
@@ -118,7 +120,24 @@ def table(data: list[list[Any]], widths: list[float] | None = None) -> Table:
     return t
 
 
-def latest_portfolios(updates: list[dict[str, Any]], final_close: float) -> dict[str, dict[str, Any]]:
+def load_initial_values(agent_ids: list[str]) -> dict[str, float]:
+    if not SYS_100_DB.exists():
+        return {agent_id: 100_000_000.0 for agent_id in agent_ids}
+    with sqlite3.connect(SYS_100_DB) as conn:
+        rows = conn.execute(
+            "SELECT agent_id, ini_cash FROM agents WHERE agent_id IN (%s)"
+            % ",".join("?" for _ in agent_ids),
+            agent_ids,
+        ).fetchall()
+    values = {str(agent_id): float(ini_cash) for agent_id, ini_cash in rows}
+    return {agent_id: values.get(agent_id, 100_000_000.0) for agent_id in agent_ids}
+
+
+def latest_portfolios(
+    updates: list[dict[str, Any]],
+    final_close: float,
+    initial_values: dict[str, float],
+) -> dict[str, dict[str, Any]]:
     states: dict[str, dict[str, Any]] = {}
     for row in updates:
         state = row["state"]
@@ -133,7 +152,10 @@ def latest_portfolios(updates: list[dict[str, Any]], final_close: float) -> dict
             pos["unrealized_pnl"] = (final_close - num(pos.get("avg_cost"))) * qty
             stock_value += final_close * qty
         state["total_value_marked_final"] = cash + stock_value
-        state["return_rate_marked_final"] = (cash + stock_value - 100_000_000) / 100_000_000
+        initial_value = initial_values.get(state["agent_id"], 100_000_000.0)
+        state["return_rate_marked_final"] = (
+            (cash + stock_value - initial_value) / initial_value if initial_value else 0.0
+        )
     return states
 
 
@@ -234,7 +256,8 @@ def main() -> None:
         fills_by_agent[row["user_id"]].append(row)
 
     final_close = num(daily_rows[-1]["closing_price"])
-    final_states = latest_portfolios(portfolio_updates, final_close)
+    initial_values = load_initial_values(list(meta["agent_ids"]))
+    final_states = latest_portfolios(portfolio_updates, final_close, initial_values)
 
     story: list[Any] = []
     story.append(para("TwinMarket Korea 시뮬레이션 실행 결과 보고서", styles["KTitle"]))

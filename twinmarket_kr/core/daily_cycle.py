@@ -8,7 +8,7 @@ from twinmarket_kr.agents.fundamental_agent import FundamentalAgent
 from twinmarket_kr.agents.memory_agent import MemoryAgent
 from twinmarket_kr.agents.news_agent import NewsAgent
 from twinmarket_kr.core.collect_context import collect_context
-from twinmarket_kr.llm.analysis import analyze_market, interpret_news
+from twinmarket_kr.llm.analysis import analyze_market, depth2_post_search, depth2_pre_search, interpret_news
 from twinmarket_kr.llm.belief import update_belief
 from twinmarket_kr.llm.client import OpenRouterClient
 from twinmarket_kr.llm.decision import build_trading_constraints, make_decision
@@ -45,15 +45,56 @@ async def run_agent_turn(
         fundamental_agent=fundamental_agent,
         news_agent=news_agent,
     )
+    today_context["news_context"] = news_agent.expand_context_from_selection(
+        base_context=today_context["news_context"],
+        current_date=date,
+    )
+    depth2_flow = None
+    if int(agent.get("news_depth") if agent.get("news_depth") is not None else 1) >= 2:
+        pre_search = await depth2_pre_search(
+            agent,
+            today_context["news_context"],
+            client=client,
+        )
+        search_results = []
+        post_search = {
+            "new_findings": "",
+            "view_change": "유지",
+            "view_change_detail": "추가 검색을 수행하지 않았습니다.",
+            "unresolved_questions": [],
+        }
+        if pre_search.get("search_needed") and pre_search.get("search_keywords"):
+            search_results = news_agent.search_news_flat(
+                keywords=list(pre_search.get("search_keywords") or []),
+                current_date=date,
+                top_n=10,
+            )
+            post_search = await depth2_post_search(
+                agent,
+                today_context["news_context"],
+                search_results,
+                pre_search,
+                client=client,
+            )
+        depth2_flow = {
+            "step1_base": {
+                "headline_count": len(today_context["news_context"].get("daily_titles") or []),
+                "summary_count": len(today_context["news_context"].get("read_contents") or []),
+            },
+            "step2_pre_search_thinking": pre_search,
+            "step3_search": {
+                "keywords": list(pre_search.get("search_keywords") or []),
+                "result_count": len(search_results),
+            },
+            "step4_post_search_thinking": post_search,
+        }
+        today_context["news_context"]["search_results"] = search_results
+        today_context["news_context"]["search_read_contents"] = search_results
+        today_context["news_context"]["depth2_flow"] = depth2_flow
     news_interpretation = await interpret_news(
         agent,
         today_context["news_context"],
         client=client,
-    )
-    today_context["news_context"] = news_agent.expand_context_from_selection(
-        base_context=today_context["news_context"],
-        selected_news=list(news_interpretation.get("selected_news") or []),
-        current_date=date,
     )
     today_context["news_interpretation"] = news_interpretation
     today_belief = await update_belief(
@@ -96,6 +137,10 @@ async def run_agent_turn(
             "fee": 0,
             "action_reason": decision["reason"],
             "risk_control": decision["risk_control"],
+            "order_type": decision["order_type"],
+            "submitted_price": decision["price"] if decision["order_type"] == "limit" else current_price,
+            "status": "pending" if decision["action"] != "hold" and decision["quantity"] > 0 else "not_submitted",
+            "filled_quantity": 0,
         }
     )
     order = None
@@ -120,5 +165,6 @@ async def run_agent_turn(
             market_analysis=market_analysis,
             decision=decision,
             order=order,
+            depth2_flow=depth2_flow,
         )
     return order

@@ -947,6 +947,7 @@ strategy                         TEXT   technical / value
 trad_pro                         INTEGER  0 (전 에이전트 고정)
 fol_ind                          TEXT   '{"전기전자", "반도체"}' (전 에이전트 고정)
 ini_cash                         INTEGER  고정 슬롯에서 부여 (1억 또는 10억)
+news_depth                       INTEGER  뉴스 정보 접근 깊이 (0=headline only, 1=10개 요약, 2=심층 검색)
 persona_prompt                   TEXT   통합 정적 정체성 텍스트
 
 --- 제거 컬럼 (동적 → portfolio_state 테이블) ---

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import pickle
+import random
 import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta
@@ -21,6 +22,21 @@ DEFAULT_DEPTH2_FIELDS = (
     {"field": "반도체 업황", "keywords": ["반도체", "업황", "수출", "장비"]},
     {"field": "거시 수급", "keywords": ["금리", "환율", "외국인", "코스피"]},
 )
+
+
+def _select_daily(rows: list[dict[str, Any]], *, seed: int | None = None) -> list[dict[str, Any]]:
+    rng = random.Random(seed)
+    selected: list[dict[str, Any]] = []
+    used_ids: set[str] = set()
+    for category, target in CATEGORY_TARGETS.items():
+        pool = [row for row in rows if row["category"] == category and row["id"] not in used_ids]
+        picks = rng.sample(pool, min(target, len(pool)))
+        selected.extend(picks)
+        used_ids.update(row["id"] for row in picks)
+    if len(selected) < sum(CATEGORY_TARGETS.values()):
+        remains = [row for row in rows if row["id"] not in used_ids]
+        selected.extend(rng.sample(remains, min(sum(CATEGORY_TARGETS.values()) - len(selected), len(remains))))
+    return selected
 
 
 def _parse_date(value: str) -> date:
@@ -85,6 +101,8 @@ def prepare_news(
     raw_pkl_path: Path | str = config.SAMSUNG_NEWS_RAW_PKL,
     processed_csv_path: Path | str = config.PROCESSED_NEWS_CSV,
     daily_csv_path: Path | str = config.DAILY_NEWS_SELECTION_CSV,
+    *,
+    daily_seed: int | None = None,
 ) -> tuple[int, int]:
     raw_path = Path(raw_pkl_path)
     if not raw_path.exists():
@@ -140,19 +158,9 @@ def prepare_news(
     by_day: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in processed:
         by_day[row["date"]].append(row)
-    for _, rows in sorted(by_day.items()):
-        used_ids = set()
-        for category, target in CATEGORY_TARGETS.items():
-            picks = [row for row in rows if row["category"] == category and row["id"] not in used_ids][:target]
-            selected.extend(picks)
-            used_ids.update(row["id"] for row in picks)
-        if len([row for row in selected if row["date"] == rows[0]["date"]]) < 10:
-            for row in rows:
-                if row["id"] not in used_ids:
-                    selected.append(row)
-                    used_ids.add(row["id"])
-                if len([item for item in selected if item["date"] == rows[0]["date"]]) >= 10:
-                    break
+    for day_index, (_, rows) in enumerate(sorted(by_day.items())):
+        seed = None if daily_seed is None else daily_seed + day_index
+        selected.extend(_select_daily(rows, seed=seed))
 
     with daily_path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["id", "title", "date", "time", "category"])
@@ -257,6 +265,49 @@ class NewsAgent:
             ]
         return result
 
+    def search_news_flat(
+        self,
+        *,
+        keywords: list[str],
+        current_date: str,
+        lookback_days: int = 7,
+        top_n: int = 10,
+    ) -> list[dict[str, Any]]:
+        normalized_keywords = [str(keyword).strip() for keyword in keywords if str(keyword).strip()]
+        if not normalized_keywords:
+            return []
+        end = _parse_date(current_date)
+        start = end - timedelta(days=lookback_days - 1)
+        candidates = [
+            row for row in self._processed if start <= _parse_date(row["date"]) <= end
+        ]
+        scored: list[tuple[float, dict[str, str]]] = []
+        for row in candidates:
+            haystack = f"{row['title']} {row.get('summary', '')}"
+            title_hits = sum(str(row["title"]).count(keyword) for keyword in normalized_keywords)
+            body_hits = sum(str(row.get("summary", "")).count(keyword) for keyword in normalized_keywords)
+            score = title_hits * 2.0 + body_hits
+            if score > 0:
+                scored.append((score, row))
+        seen_ids = {row["id"] for _, row in scored}
+        if len(scored) < top_n:
+            for row in candidates:
+                if row["id"] not in seen_ids:
+                    scored.append((0.0, row))
+                    seen_ids.add(row["id"])
+        scored.sort(key=lambda item: (-item[0], -_parse_date(item[1]["date"]).toordinal(), item[1]["title"]))
+        return [
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "date": row["date"],
+                "category": row.get("category", ""),
+                "summary": row.get("summary", ""),
+                "relevance_score": score,
+            }
+            for score, row in scored[:top_n]
+        ]
+
     def build_base_context(self, target_date: str, news_depth: int = 1) -> dict[str, Any]:
         return {
             "news_depth": news_depth,
@@ -265,9 +316,9 @@ class NewsAgent:
             "search_results": {},
             "search_read_contents": [],
             "limits": {
-                "daily_read_max": 3,
-                "search_fields_max": 4 if news_depth >= 2 else 0,
-                "search_read_max": 5 if news_depth >= 2 else 0,
+                "daily_read_max": 0 if news_depth <= 0 else 10,
+                "search_fields_max": 0,
+                "search_read_max": 10 if news_depth >= 2 else 0,
                 "lookback_days": 7 if news_depth >= 2 else 0,
             },
         }
@@ -276,37 +327,25 @@ class NewsAgent:
         self,
         *,
         base_context: dict[str, Any],
-        selected_news: list[Any],
+        selected_news: list[Any] | None = None,
         current_date: str,
     ) -> dict[str, Any]:
-        news_depth = int(base_context.get("news_depth") or 1)
+        news_depth = 1 if base_context.get("news_depth") is None else int(base_context["news_depth"])
         daily_titles = base_context.get("daily_titles") or []
         allowed_daily_ids = {str(row.get("id")) for row in daily_titles if row.get("id")}
-        selected_ids, selected_titles = self._normalize_selected_news(selected_news)
-        read_contents = self.read_news(
-            ids=selected_ids,
-            titles=selected_titles,
-            allowed_ids=allowed_daily_ids,
-            max_items=3,
-        )
-
-        search_results: dict[str, list[dict[str, str]]] = {}
-        search_read_contents: list[dict[str, str]] = []
-        if news_depth >= 2:
-            fields = self._depth2_search_fields(read_contents, daily_titles)
-            search_results = self.search_news(fields=fields, current_date=current_date)
-            search_titles = [
-                row["title"]
-                for rows in search_results.values()
-                for row in rows
-                if row.get("id") not in allowed_daily_ids
-            ]
-            search_read_contents = self.read_news(titles=search_titles, max_items=5)
+        if news_depth <= 0:
+            read_contents: list[dict[str, str]] = []
+        else:
+            read_contents = self.read_news(
+                ids=[str(row.get("id")) for row in daily_titles if row.get("id")],
+                allowed_ids=allowed_daily_ids,
+                max_items=10,
+            )
 
         expanded = dict(base_context)
         expanded["read_contents"] = read_contents
-        expanded["search_results"] = search_results
-        expanded["search_read_contents"] = search_read_contents
+        expanded.setdefault("search_results", {})
+        expanded.setdefault("search_read_contents", [])
         return expanded
 
     @staticmethod
@@ -330,22 +369,6 @@ class NewsAgent:
                 else:
                     titles.append(text)
         return ids, titles
-
-    @staticmethod
-    def _depth2_search_fields(
-        read_contents: list[dict[str, str]],
-        daily_titles: list[dict[str, str]],
-    ) -> list[dict[str, list[str]]]:
-        text = " ".join(
-            [row.get("title", "") + " " + row.get("content", "") for row in read_contents]
-            + [row.get("title", "") for row in daily_titles]
-        )
-        fields = []
-        for field in DEFAULT_DEPTH2_FIELDS:
-            keywords = [keyword for keyword in field["keywords"] if keyword in text]
-            if keywords:
-                fields.append({"field": field["field"], "keywords": keywords})
-        return fields[:4] or [dict(field) for field in DEFAULT_DEPTH2_FIELDS[:2]]
 
     @staticmethod
     def _load_csv(path: Path) -> list[dict[str, str]]:

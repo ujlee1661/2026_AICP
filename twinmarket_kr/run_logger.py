@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -17,10 +18,14 @@ class SimulationLogger:
         root_dir: Path | str = config.LOG_DIR,
         run_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        overwrite_root: bool = True,
     ) -> None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.run_id = run_id or f"simulation_{timestamp}"
-        self.run_dir = Path(root_dir) / self.run_id
+        root = Path(root_dir)
+        if overwrite_root and root.exists():
+            shutil.rmtree(root)
+        self.run_dir = root / "current"
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._agent_csv_fields = [
@@ -32,6 +37,9 @@ class SimulationLogger:
             "selected_news_count",
             "read_news_count",
             "search_read_count",
+            "depth2_search_keywords",
+            "depth2_search_result_count",
+            "depth2_view_change",
             "news_sentiment",
             "action",
             "quantity",
@@ -94,6 +102,7 @@ class SimulationLogger:
         market_analysis: dict[str, Any],
         decision: dict[str, Any],
         order: dict[str, Any] | None,
+        depth2_flow: dict[str, Any] | None = None,
     ) -> None:
         news_context = context.get("news_context") or {}
         event = {
@@ -109,8 +118,12 @@ class SimulationLogger:
             "decision": decision,
             "submitted_order": order,
         }
+        if depth2_flow is not None:
+            event["depth2_flow"] = depth2_flow
         self.write_jsonl("agent_turns.jsonl", event)
         selected_news = news_interpretation.get("selected_news") or []
+        step3 = (depth2_flow or {}).get("step3_search") or {}
+        step4 = (depth2_flow or {}).get("step4_post_search_thinking") or {}
         self.append_csv(
             "agent_turns.csv",
             self._agent_csv_fields,
@@ -123,6 +136,9 @@ class SimulationLogger:
                 "selected_news_count": len(selected_news) if isinstance(selected_news, list) else 0,
                 "read_news_count": len(news_context.get("read_contents") or []),
                 "search_read_count": len(news_context.get("search_read_contents") or []),
+                "depth2_search_keywords": ", ".join(step3.get("keywords") or []),
+                "depth2_search_result_count": step3.get("result_count", ""),
+                "depth2_view_change": step4.get("view_change", ""),
                 "news_sentiment": news_interpretation.get("news_sentiment"),
                 "action": decision.get("action"),
                 "quantity": decision.get("quantity"),

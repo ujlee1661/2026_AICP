@@ -13,6 +13,7 @@ class MemoryAgent:
     def __init__(self, db_path: Path | str = config.SIM_DB) -> None:
         self.db_path = Path(db_path)
         init_sim_db(self.db_path)
+        self._ensure_trade_log_columns()
 
     def save_belief(self, belief: dict[str, Any]) -> None:
         required = {"agent_id", "turn", "date", "belief_summary"}
@@ -208,8 +209,9 @@ class MemoryAgent:
                 """
                 INSERT OR REPLACE INTO trade_log (
                     log_id, agent_id, turn, date, action, stock_code, quantity,
-                    executed_price, trade_value, fee, action_reason, risk_control
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    executed_price, trade_value, fee, action_reason, risk_control,
+                    order_type, submitted_price, status, filled_quantity
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     log_id,
@@ -224,7 +226,38 @@ class MemoryAgent:
                     float(record.get("fee", 0)),
                     record.get("action_reason"),
                     record.get("risk_control"),
+                    record.get("order_type"),
+                    record.get("submitted_price"),
+                    record.get("status", "pending"),
+                    int(record.get("filled_quantity", 0)),
                 ),
+            )
+            conn.commit()
+
+    def update_trade_execution(
+        self,
+        agent_id: str,
+        turn: int,
+        *,
+        filled_quantity: int,
+        executed_price: float | None,
+        fee: float = 0.0,
+    ) -> None:
+        log_id = f"tl_{agent_id}_t{turn:03d}"
+        status = "filled" if filled_quantity > 0 else "unfilled"
+        trade_value = None if executed_price is None else executed_price * filled_quantity
+        with connect(self.db_path) as conn:
+            conn.execute(
+                """
+                UPDATE trade_log
+                SET status = ?,
+                    filled_quantity = ?,
+                    executed_price = ?,
+                    trade_value = ?,
+                    fee = ?
+                WHERE log_id = ?
+                """,
+                (status, filled_quantity, executed_price, trade_value, fee, log_id),
             )
             conn.commit()
 
@@ -232,7 +265,8 @@ class MemoryAgent:
         with connect(self.db_path) as conn:
             row = conn.execute(
                 """
-                SELECT action_reason
+                SELECT action, quantity, submitted_price, status, filled_quantity,
+                       executed_price, action_reason
                 FROM trade_log
                 WHERE agent_id = ? AND action IN ('buy', 'sell')
                   AND action_reason IS NOT NULL
@@ -241,7 +275,22 @@ class MemoryAgent:
                 """,
                 (agent_id,),
             ).fetchone()
-        return None if row is None else str(row["action_reason"])
+        if row is None:
+            return None
+        submitted = row["submitted_price"]
+        submitted_text = "" if submitted is None else f", 제출가 {float(submitted):,.0f}원"
+        if row["status"] == "filled":
+            result = f"체결 {int(row['filled_quantity']):,}주"
+            if row["executed_price"] is not None:
+                result += f"@{float(row['executed_price']):,.0f}원"
+        elif row["status"] == "unfilled":
+            result = "미체결"
+        else:
+            result = "체결 결과 대기"
+        return (
+            f"이전 주문: {row['action']} {int(row['quantity']):,}주{submitted_text}. "
+            f"체결 결과: {result}. 사유: {row['action_reason']}"
+        )
 
     def get_portfolio_summary(self, agent_id: str, turn: int) -> str:
         row = self._latest_portfolio(agent_id, before_or_at_turn=turn)
@@ -285,6 +334,20 @@ class MemoryAgent:
     def _initial_value(self, agent_id: str) -> float:
         row = self._latest_portfolio(agent_id, before_or_at_turn=0)
         return 0.0 if row is None else float(row["total_value"])
+
+    def _ensure_trade_log_columns(self) -> None:
+        expected = {
+            "order_type": "TEXT",
+            "submitted_price": "REAL",
+            "status": "TEXT NOT NULL DEFAULT 'pending'",
+            "filled_quantity": "INTEGER NOT NULL DEFAULT 0",
+        }
+        with connect(self.db_path) as conn:
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(trade_log)").fetchall()}
+            for name, ddl in expected.items():
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE trade_log ADD COLUMN {name} {ddl}")
+            conn.commit()
 
 
 def load_agents_from_sys100(sys100_db: Path | str = config.SYS_100_DB) -> list[dict[str, Any]]:

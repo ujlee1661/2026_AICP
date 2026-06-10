@@ -18,10 +18,14 @@ def build_trading_constraints(
     current_price: float,
     commission_rate: float = config.COMMISSION_RATE,
     min_order_unit: int = config.MIN_ORDER_UNIT,
+    max_single_trade_cash_ratio: float = config.MAX_SINGLE_TRADE_CASH_RATIO,
 ) -> dict[str, Any]:
-    max_buy_quantity = int(available_cash // (current_price * (1 + commission_rate))) if current_price > 0 else 0
+    usable_cash = max(0.0, available_cash * max_single_trade_cash_ratio)
+    max_buy_quantity = int(usable_cash // (current_price * (1 + commission_rate))) if current_price > 0 else 0
     return {
         "available_cash": available_cash,
+        "max_single_trade_cash_ratio": max_single_trade_cash_ratio,
+        "max_single_trade_cash": usable_cash,
         "current_quantity": current_quantity,
         "current_price": current_price,
         "commission_rate": commission_rate,

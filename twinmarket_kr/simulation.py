@@ -48,15 +48,18 @@ async def run_simulation(
 ) -> None:
     agents = load_agents_from_sys100(config.SYS_100_DB)
     if max_agents:
+        all_agents = agents
         if random_agents:
             agents = random.Random(random_seed).sample(agents, min(max_agents, len(agents)))
             agents.sort(key=lambda agent: agent["agent_id"])
         else:
             agents = agents[:max_agents]
+        agents = _ensure_depth2_agent(agents, all_agents)
     dates = trading_dates(max_days)
     if not dates:
         raise RuntimeError("No StockData rows found. Run scripts/03_load_stock_data.py first.")
 
+    _reset_runtime_tables(config.SIM_DB)
     memory = MemoryAgent(config.SIM_DB)
     fundamental = FundamentalAgent(config.SIM_DB)
     news = NewsAgent()
@@ -121,6 +124,7 @@ async def run_simulation(
             agents=agents,
             turn=index,
             date=day,
+            orders=orders,
             results=results,
             current_prices={config.STOCK_CODE: real_price},
             logger=logger,
@@ -139,12 +143,25 @@ async def run_simulation(
         print(f"log_dir={logger.run_dir}")
 
 
+def _ensure_depth2_agent(agents: list[dict[str, Any]], all_agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if any(int(agent.get("news_depth") or 0) >= 2 for agent in agents):
+        return agents
+    depth2_agents = [agent for agent in all_agents if int(agent.get("news_depth") or 0) >= 2]
+    if not depth2_agents:
+        raise RuntimeError("테스트 실행에 Depth 2 에이전트가 최소 1명 필요합니다. sys_100.db를 확인하세요.")
+    if not agents:
+        return depth2_agents[:1]
+    replaced = [*agents[:-1], depth2_agents[0]]
+    return sorted({agent["agent_id"]: agent for agent in replaced}.values(), key=lambda agent: agent["agent_id"])
+
+
 def _update_portfolios_from_results(
     *,
     memory: MemoryAgent,
     agents: list[dict[str, Any]],
     turn: int,
     date: str,
+    orders: list[dict[str, Any]],
     results: dict[str, dict[str, Any]],
     current_prices: dict[str, float],
     logger: SimulationLogger | None,
@@ -167,11 +184,23 @@ def _update_portfolios_from_results(
                     "fee": abs(quantity * price) * config.COMMISSION_RATE,
                 }
             )
+    submitted_agent_ids = {str(order.get("user_id")) for order in orders if order.get("user_id")}
+    for agent_id in submitted_agent_ids:
+        fills = fills_by_agent.get(agent_id, [])
+        filled_quantity = sum(int(fill["quantity"]) for fill in fills)
+        total_value = sum(float(fill["quantity"]) * float(fill["price"]) for fill in fills)
+        total_fee = sum(float(fill.get("fee", 0)) for fill in fills)
+        executed_price = total_value / filled_quantity if filled_quantity else None
+        memory.update_trade_execution(
+            agent_id,
+            turn,
+            filled_quantity=filled_quantity,
+            executed_price=executed_price,
+            fee=total_fee,
+        )
     for agent in agents:
         agent_id = str(agent["agent_id"])
         fills = fills_by_agent.get(agent_id, [])
-        if not fills:
-            continue
         state = memory.update_portfolio(
             agent_id,
             turn,
@@ -192,3 +221,12 @@ def _update_portfolios_from_results(
                     "state": state,
                 },
             )
+
+
+def _reset_runtime_tables(db_path: str) -> None:
+    with connect(db_path) as conn:
+        conn.execute("DELETE FROM TradingDetails")
+        conn.execute("DELETE FROM trade_log")
+        conn.execute("DELETE FROM belief_history WHERE turn > 0")
+        conn.execute("DELETE FROM portfolio_state WHERE turn > 0")
+        conn.commit()

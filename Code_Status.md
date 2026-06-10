@@ -100,8 +100,8 @@
 - 영향: `config.py`, `scripts/01_build_persona.py` 실행 결과.
 - 되돌릴 때: 더 큰 pool이나 별도 실험 조건이 생기면 `config.py`의 `RANDOM_SEED`를 바꿔 재선발한다.
 
-### [D-13] agents 테이블에 news_depth 저장  (Step 1, 2026-06-02)
-- 무엇을: `agents` 스키마에 `news_depth` 컬럼을 추가하고 70명 Depth 1, 30명 Depth 2를 결정적 순서로 배정했다.
+### [D-13] agents 테이블에 news_depth 저장  (Step 1, 2026-06-02 / 2026-06-10 갱신)
+- 무엇을: `agents` 스키마에 `news_depth` 컬럼을 추가했다. 2026-06-10 갱신 후에는 기존 Depth 1 후보 중 15명을 시드 기반 랜덤으로 Depth 0에 배정하여 15명 Depth 0, 55명 Depth 1, 30명 Depth 2 구조를 사용한다.
 - 왜: News 설계는 Depth를 페르소나 속성으로 요구하지만 Persona 스키마에는 별도 컬럼이 없었다.
 - 영향: `twinmarket_kr/db/schema.py`, `twinmarket_kr/persona/select.py`.
 - 되돌릴 때: Depth를 별도 설정 파일에서 관리하려면 `assign_news_depth()`와 agents DDL을 조정한다.
@@ -130,8 +130,14 @@
 - 영향: `twinmarket_kr/llm/analysis.py`, `twinmarket_kr/llm/decision.py`, `twinmarket_kr/core/daily_cycle.py`.
 - 되돌릴 때: `make_decision.txt`에서 `market_analysis` 입력을 제거하고 `decision.py` 시그니처를 이전 형태로 되돌린다.
 
-### [D-18] Depth별 뉴스 컨텍스트 materialization  (Step 4d/8, 2026-06-09)
-- 무엇을: `collect_context`는 agent의 `news_depth`를 NewsAgent에 전달한다. LLM의 `selected_news` 결과를 기준으로 Depth 1은 일일 뉴스 중 최대 3개 본문을 읽고, Depth 2는 최근 7일 키워드 검색 결과와 검색 결과 본문 최대 5개를 추가한다.
-- 왜: 기존 구현은 일일 제목 10개만 반환해 News 설계의 Depth 1/2 읽기 예산과 `read_news`/`search_news` 흐름이 실제 context에 반영되지 않았다.
+### [D-18] Depth별 뉴스 컨텍스트 materialization  (Step 4d/8, 2026-06-09 / 2026-06-10 갱신)
+- 무엇을: `collect_context`는 agent의 `news_depth`를 NewsAgent에 전달한다. Depth 0은 일일 제목 10개만, Depth 1은 일일 제목 10개와 요약 10개 전체를, Depth 2는 Depth 1 정보에 더해 LLM pre-search가 정한 키워드로 최근 7일 flat 검색 결과 10개를 추가한다.
+- 왜: 기존 구현은 Depth 1이 최대 3개 선택 읽기였고, Depth 2 검색 키워드를 Python이 하드코딩으로 정해 agentic search 흐름이 로그에 남지 않았다.
 - 영향: `twinmarket_kr/agents/news_agent.py`, `twinmarket_kr/core/collect_context.py`, `twinmarket_kr/core/daily_cycle.py`.
 - 되돌릴 때: 완전한 tool-calling loop를 구현하면 `expand_context_from_selection()`을 OpenAI tool call 처리 루프로 대체한다.
+
+### [D-19] 재실행 격리와 체결 기준 trade_log  (Step 8/9, 2026-06-10)
+- 무엇을: 시뮬레이션 시작 시 `TradingDetails`, `trade_log`, turn>0 `belief_history`, turn>0 `portfolio_state`를 정리한다. `trade_log`는 주문 제출 시 pending으로 기록하고 Exchange 이후 filled/unfilled로 갱신한다. 체결이 없는 날도 포트폴리오 current_price와 미실현손익을 갱신한다.
+- 왜: 같은 `sim.db` 재사용 시 이전 실행 체결 내역이 섞이고, 미체결 주문이 실제 거래처럼 다음날 context에 전달되는 문제를 막기 위해서다.
+- 영향: `twinmarket_kr/simulation.py`, `twinmarket_kr/agents/memory_agent.py`, `twinmarket_kr/db/schema.py`.
+- 되돌릴 때: run_id별 DB 파일을 도입하면 런타임 테이블 정리 대신 실행별 DB 경로를 사용한다.
