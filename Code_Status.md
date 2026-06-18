@@ -118,6 +118,12 @@
 - 영향: `twinmarket_kr/llm/belief.py`, `outputs/sim.db`의 현재 turn=0 belief 100개.
 - 되돌릴 때: `.env`와 requirements 설치 후 `scripts/04_generate_initial_beliefs.py`를 offline 없이 다시 실행하면 LLM 기반 belief로 덮어쓸 수 있다.
 
+### [D-20] 거래 수수료율 = 거래대금의 0.05%  (Step 5/9, 2026-06-18)
+- 무엇을: 체결된 에이전트 거래마다 `price * quantity * 0.0005` 수수료를 부과한다. `COUNTERSIDE`는 합성 잔차 유동성이므로 수수료 대상에서 제외한다.
+- 왜: 사용자 요청으로 거래대금의 0.05% 수수료를 추가했다.
+- 영향: `config.py`, `exchange_agent.py`, `simulation.py`, `memory_agent.py`, `run_logger.py`. 포트폴리오 현금, 실현손익, trade_log fee, exchange_fills.csv fee가 영향을 받는다.
+- 되돌릴 때: `config.COMMISSION_RATE`를 0으로 바꾸거나 수수료 계산부를 제거한다.
+
 ### [D-16] 실제 시장/뉴스 데이터 미제공 상태에서 모듈 검증은 fixture 사용  (Step 3/4/5, 2026-06-02)
 - 무엇을: `stock_data.csv`와 `samsung_news_raw.pkl`이 아직 없어 Step 3/4는 임시 fixture로 로딩/조회 로직을 검증했다. 실제 데이터 적재는 파일 제공 후 실행한다.
 - 왜: 데이터가 없는 상태에서도 코드 경로, 파생지표 계산, 뉴스 도구 입출력, 매칭 엔진을 먼저 검증할 수 있다.

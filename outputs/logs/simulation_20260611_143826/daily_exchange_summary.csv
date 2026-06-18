@@ -1,0 +1,3 @@
+﻿run_id,date,turn,stock_code,submitted_orders,closing_price,volume,fill_count
+simulation_20260611_143826,2025-02-11,1,005930,1,55700.0,500,1
+simulation_20260611_143826,2025-02-12,2,005930,0,55800.0,0,0

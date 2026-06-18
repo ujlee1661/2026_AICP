@@ -33,12 +33,16 @@ def _as_order(value: Order | dict[str, Any]) -> Order:
 
 
 def _transaction(order: Order, executed_price: float, quantity: int) -> dict[str, Any]:
+    fee = 0.0
+    if order.user_id != config.COUNTERSIDE_USER_ID:
+        fee = executed_price * int(quantity) * config.COMMISSION_RATE
     return {
         "stock_code": order.stock_code,
         "user_id": order.user_id,
         "direction": order.direction,
         "executed_price": executed_price,
         "executed_quantity": int(quantity),
+        "fee": fee,
         "timestamp": order.timestamp,
     }
 
@@ -112,10 +116,10 @@ class ExchangeAgent:
         max_ts = max([order.timestamp for order in normalized_buys + normalized_sells] or [0]) + 0.001
 
         if imbalance > 0:
-            normalized_sells.append(Order(stock_code, "INSTITUTIONAL", "sell", imbalance, target_price, max_ts))
+            normalized_sells.append(Order(stock_code, config.COUNTERSIDE_USER_ID, "sell", imbalance, target_price, max_ts))
             sell_vol += imbalance
         elif imbalance < 0:
-            normalized_buys.append(Order(stock_code, "INSTITUTIONAL", "buy", abs(imbalance), target_price, max_ts))
+            normalized_buys.append(Order(stock_code, config.COUNTERSIDE_USER_ID, "buy", abs(imbalance), target_price, max_ts))
             buy_vol += abs(imbalance)
 
         matched_volume = min(buy_vol, sell_vol)

@@ -116,7 +116,7 @@ class MemoryAgent:
             direction = fill["direction"]
             quantity = int(fill["quantity"])
             price = float(fill["price"])
-            fee = 0.0
+            fee = float(fill.get("fee", 0.0))
             pos = positions.setdefault(
                 stock_code,
                 {

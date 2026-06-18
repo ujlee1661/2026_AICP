@@ -238,7 +238,7 @@ class SimulationLogger:
                         "direction": tx.get("direction"),
                         "executed_price": tx.get("executed_price"),
                         "executed_quantity": tx.get("executed_quantity"),
-                        "fee": 0.0,
+                        "fee": tx.get("fee", 0.0),
                     },
                 )
 

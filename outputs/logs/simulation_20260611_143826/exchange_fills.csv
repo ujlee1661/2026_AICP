@@ -1,0 +1,2 @@
+﻿run_id,date,turn,stock_code,user_id,direction,executed_price,executed_quantity,fee
+simulation_20260611_143826,2025-02-11,1,005930,A077,buy,55500.0,500,4162.5

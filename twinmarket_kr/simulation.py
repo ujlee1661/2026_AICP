@@ -229,7 +229,7 @@ def _update_portfolios_from_results(
     for stock_code, result in results.items():
         for tx in result.get("transactions") or []:
             user_id = str(tx.get("user_id") or "")
-            if not user_id or user_id == "INSTITUTIONAL":
+            if not user_id or user_id == config.COUNTERSIDE_USER_ID:
                 continue
             quantity = int(tx.get("executed_quantity", 0))
             price = float(tx.get("executed_price", 0))
@@ -240,7 +240,7 @@ def _update_portfolios_from_results(
                     "direction": tx.get("direction"),
                     "quantity": quantity,
                     "price": price,
-                    "fee": 0.0,
+                    "fee": float(tx.get("fee", price * quantity * config.COMMISSION_RATE)),
                 }
             )
     submitted_agent_ids = {str(order.get("user_id")) for order in orders if order.get("user_id")}
