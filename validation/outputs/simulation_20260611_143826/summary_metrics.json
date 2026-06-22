@@ -1,0 +1,89 @@
+{
+  "run_id": "simulation_20260611_143826",
+  "run_dir": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/outputs/logs/simulation_20260611_143826",
+  "actual_value": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/validation/data_trading_value.csv",
+  "actual_volume": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/validation/data_trading_volume.csv",
+  "generated_at": "2026-06-22T12:59:14",
+  "value": {
+    "metric": "value",
+    "overlap_days": 2,
+    "llm_vs_individuals": {
+      "days": 2,
+      "direction_match_rate": 0.0,
+      "nonzero_direction_match_rate": 0.0,
+      "pearson_correlation": -1.0,
+      "cosine_similarity": -0.9655722636322918
+    },
+    "counterside_vs_investor_groups": {
+      "Individuals": {
+        "days": 2,
+        "direction_match_rate": 0.0,
+        "nonzero_direction_match_rate": null,
+        "pearson_correlation": null,
+        "cosine_similarity": null
+      },
+      "Subtotal-Institutions": {
+        "days": 2,
+        "direction_match_rate": 0.0,
+        "nonzero_direction_match_rate": null,
+        "pearson_correlation": null,
+        "cosine_similarity": null
+      },
+      "Total of foreign": {
+        "days": 2,
+        "direction_match_rate": 0.0,
+        "nonzero_direction_match_rate": null,
+        "pearson_correlation": null,
+        "cosine_similarity": null
+      },
+      "Other corporations": {
+        "days": 2,
+        "direction_match_rate": 0.0,
+        "nonzero_direction_match_rate": null,
+        "pearson_correlation": null,
+        "cosine_similarity": null
+      }
+    }
+  },
+  "volume": {
+    "metric": "volume",
+    "overlap_days": 2,
+    "llm_vs_individuals": {
+      "days": 2,
+      "direction_match_rate": 0.0,
+      "nonzero_direction_match_rate": 0.0,
+      "pearson_correlation": -1.0,
+      "cosine_similarity": -0.9662710448751747
+    },
+    "counterside_vs_investor_groups": {
+      "Individuals": {
+        "days": 2,
+        "direction_match_rate": 0.0,
+        "nonzero_direction_match_rate": null,
+        "pearson_correlation": null,
+        "cosine_similarity": null
+      },
+      "Subtotal-Institutions": {
+        "days": 2,
+        "direction_match_rate": 0.0,
+        "nonzero_direction_match_rate": null,
+        "pearson_correlation": null,
+        "cosine_similarity": null
+      },
+      "Total of foreign": {
+        "days": 2,
+        "direction_match_rate": 0.0,
+        "nonzero_direction_match_rate": null,
+        "pearson_correlation": null,
+        "cosine_similarity": null
+      },
+      "Other corporations": {
+        "days": 2,
+        "direction_match_rate": 0.0,
+        "nonzero_direction_match_rate": null,
+        "pearson_correlation": null,
+        "cosine_similarity": null
+      }
+    }
+  }
+}
