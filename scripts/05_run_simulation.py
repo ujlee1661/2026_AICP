@@ -21,6 +21,18 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=2)
     parser.add_argument("--start-date", default=None)
     parser.add_argument("--end-date", default=None)
+    parser.add_argument(
+        "--information-mode",
+        choices=("same_day", "prior_close"),
+        default="same_day",
+        help="Information cutoff for each decision turn.",
+    )
+    parser.add_argument(
+        "--decision-space",
+        choices=("buy_hold_sell", "buy_sell_only"),
+        default="buy_hold_sell",
+        help="Allowed trading actions for the decision parser.",
+    )
     parser.add_argument("--balanced-depths", action="store_true")
     parser.add_argument("--no-logs", action="store_true", help="Disable detailed output logs.")
     args = parser.parse_args()
@@ -34,6 +46,8 @@ def main() -> None:
             random_seed=args.seed,
             start_date=args.start_date,
             end_date=args.end_date,
+            information_mode=args.information_mode,
+            decision_space=args.decision_space,
             balanced_depths=args.balanced_depths,
         )
     )

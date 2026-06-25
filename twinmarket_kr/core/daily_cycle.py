@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from typing import Any
 
 import config
@@ -31,23 +32,33 @@ async def run_agent_turn(
     *,
     turn: int,
     date: str,
+    market_features_date: str | None = None,
+    news_max_date: str | None = None,
+    execution_date: str | None = None,
+    information_mode: str = "same_day",
+    decision_space: str = "buy_hold_sell",
     memory_agent: MemoryAgent,
     fundamental_agent: FundamentalAgent,
     news_agent: NewsAgent,
     client: OpenRouterClient | None = None,
     event_logger: Any | None = None,
+    db_write_lock: asyncio.Lock | None = None,
 ) -> dict[str, Any] | None:
     today_context = collect_context(
         agent,
         turn=turn,
         date=date,
+        market_features_date=market_features_date,
+        news_max_date=news_max_date,
+        execution_date=execution_date,
+        information_mode=information_mode,
         memory_agent=memory_agent,
         fundamental_agent=fundamental_agent,
         news_agent=news_agent,
     )
     today_context["news_context"] = news_agent.expand_context_from_selection(
         base_context=today_context["news_context"],
-        current_date=date,
+        current_date=today_context["news_max_date"],
     )
     depth2_flow = None
     if int(agent.get("news_depth") if agent.get("news_depth") is not None else 1) >= 2:
@@ -66,7 +77,7 @@ async def run_agent_turn(
         if pre_search.get("search_keywords"):
             search_results = news_agent.search_news_flat(
                 keywords=list(pre_search.get("search_keywords") or []),
-                current_date=date,
+                current_date=today_context["news_max_date"],
                 top_n=10,
             )
             post_search = await depth2_post_search(
@@ -101,14 +112,20 @@ async def run_agent_turn(
         agent,
         today_context,
         client=client,
-        memory=memory_agent,
+        memory=None,
     )
+    if db_write_lock is not None:
+        async with db_write_lock:
+            memory_agent.save_belief(today_belief)
+    else:
+        memory_agent.save_belief(today_belief)
     current_price = float(today_context["market_features"]["close"])
     available_cash, current_quantity = _portfolio_numbers(memory_agent, agent["agent_id"], turn - 1)
     constraints = build_trading_constraints(
         available_cash=available_cash,
         current_quantity=current_quantity,
         current_price=current_price,
+        allow_hold=decision_space != "buy_sell_only",
     )
     market_analysis = await analyze_market(
         agent,
@@ -124,25 +141,29 @@ async def run_agent_turn(
         market_analysis,
         today_context["portfolio_summary"],
         constraints,
+        allow_hold=decision_space != "buy_sell_only",
         client=client,
     )
-    memory_agent.append_trade_log(
-        {
-            "agent_id": agent["agent_id"],
-            "turn": turn,
-            "date": date,
-            "action": decision["action"],
-            "stock_code": config.STOCK_CODE,
-            "quantity": decision["quantity"],
-            "fee": 0,
-            "action_reason": decision["reason"],
-            "risk_control": decision["risk_control"],
-            "order_type": decision["order_type"],
-            "submitted_price": decision["price"] if decision["order_type"] == "limit" else current_price,
-            "status": "pending" if decision["action"] != "hold" and decision["quantity"] > 0 else "not_submitted",
-            "filled_quantity": 0,
-        }
-    )
+    trade_log = {
+        "agent_id": agent["agent_id"],
+        "turn": turn,
+        "date": execution_date or date,
+        "action": decision["action"],
+        "stock_code": config.STOCK_CODE,
+        "quantity": decision["quantity"],
+        "fee": 0,
+        "action_reason": decision["reason"],
+        "risk_control": decision["risk_control"],
+        "order_type": decision["order_type"],
+        "submitted_price": decision["price"],
+        "status": "pending" if decision["action"] != "hold" and decision["quantity"] > 0 else "not_submitted",
+        "filled_quantity": 0,
+    }
+    if db_write_lock is not None:
+        async with db_write_lock:
+            memory_agent.append_trade_log(trade_log)
+    else:
+        memory_agent.append_trade_log(trade_log)
     order = None
     if decision["action"] != "hold" and decision["quantity"] > 0:
         order = {
@@ -150,9 +171,14 @@ async def run_agent_turn(
             "user_id": agent["agent_id"],
             "direction": decision["action"],
             "quantity": decision["quantity"],
-            "price": decision["price"] if decision["order_type"] == "limit" else 0,
+            "price": decision["price"],
             "timestamp": float(turn),
             "reason": decision["reason"],
+            "decision_date": today_context["decision_date"],
+            "market_features_date": today_context["market_features_date"],
+            "news_max_date": today_context["news_max_date"],
+            "execution_date": today_context["execution_date"],
+            "information_mode": today_context["information_mode"],
         }
     if event_logger is not None:
         event_logger.log_agent_turn(

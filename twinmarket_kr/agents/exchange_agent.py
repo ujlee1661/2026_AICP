@@ -69,7 +69,9 @@ class ExchangeAgent:
 
         transactions = []
         for order in target_orders:
-            exec_price = real_price if order.price == 0 else order.price
+            if order.price <= 0:
+                continue
+            exec_price = order.price
             if lower_limit <= exec_price <= upper_limit and order.quantity > 0:
                 transactions.append(_transaction(order, exec_price, order.quantity))
         volume = sum(tx["executed_quantity"] for tx in transactions)
@@ -91,24 +93,18 @@ class ExchangeAgent:
         buys = [
             _as_order(order)
             for order in buy_orders
-            if _as_order(order).quantity > 0 and (_as_order(order).price == 0 or lower_limit <= _as_order(order).price <= upper_limit)
+            if _as_order(order).quantity > 0 and lower_limit <= _as_order(order).price <= upper_limit
         ]
         sells = [
             _as_order(order)
             for order in sell_orders
-            if _as_order(order).quantity > 0 and (_as_order(order).price == 0 or lower_limit <= _as_order(order).price <= upper_limit)
+            if _as_order(order).quantity > 0 and lower_limit <= _as_order(order).price <= upper_limit
         ]
         if not buys and not sells:
             return target_price, 0, []
 
-        normalized_buys = [
-            Order(o.stock_code, o.user_id, o.direction, o.quantity, upper_limit if o.price == 0 else o.price, o.timestamp)
-            for o in buys
-        ]
-        normalized_sells = [
-            Order(o.stock_code, o.user_id, o.direction, o.quantity, lower_limit if o.price == 0 else o.price, o.timestamp)
-            for o in sells
-        ]
+        normalized_buys = [Order(o.stock_code, o.user_id, o.direction, o.quantity, o.price, o.timestamp) for o in buys]
+        normalized_sells = [Order(o.stock_code, o.user_id, o.direction, o.quantity, o.price, o.timestamp) for o in sells]
 
         buy_vol = sum(order.quantity for order in normalized_buys if order.price >= target_price)
         sell_vol = sum(order.quantity for order in normalized_sells if order.price <= target_price)

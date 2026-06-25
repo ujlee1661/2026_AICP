@@ -147,3 +147,21 @@
 - 왜: 같은 `sim.db` 재사용 시 이전 실행 체결 내역이 섞이고, 미체결 주문이 실제 거래처럼 다음날 context에 전달되는 문제를 막기 위해서다.
 - 영향: `twinmarket_kr/simulation.py`, `twinmarket_kr/agents/memory_agent.py`, `twinmarket_kr/db/schema.py`.
 - 되돌릴 때: run_id별 DB 파일을 도입하면 런타임 테이블 정리 대신 실행별 DB 경로를 사용한다.
+
+### [D-21] limit-only 주문과 정보 기준일 모드  (Simulation Improvement, 2026-06-25)
+- 무엇을: `--information-mode same_day|prior_close`를 추가했다. `prior_close`에서는 D일 의사결정에 D-1 시장 지표와 D-1 이하 뉴스만 사용하고, 실행/검증 날짜는 D일로 유지한다. 주문은 전부 `limit`으로 강제하며, LLM이 `market` 또는 0 이하 가격을 내면 parser가 기준 가격으로 보정하고 `order_corrections` 로그를 남긴다.
+- 왜: D일 종가/뉴스를 보고 D일 주문을 내는 lookahead 가능성을 분리해서 비교하고, 시장가 주문이 실제가격 앵커 체결 구조를 느슨하게 만드는 문제를 줄이기 위해서다.
+- 영향: `scripts/05_run_simulation.py`, `twinmarket_kr/simulation.py`, `core/collect_context.py`, `core/daily_cycle.py`, `llm/decision.py`, `agents/exchange_agent.py`, `run_logger.py`, `prompts/make_decision.txt`, 보고서/validation.
+- 되돌릴 때: CLI 기본값 `same_day`를 그대로 쓰면 기존 정보 구조와 호환된다. 시장가 허용으로 되돌리려면 decision prompt/parser와 exchange의 price=0 처리 경로를 다시 열어야 한다.
+
+### [D-23] 병렬 LLM 유지 + SQLite write 직렬화  (Simulation Improvement, 2026-06-25)
+- 무엇을: 같은 거래일의 agent turn은 기존처럼 `asyncio.Semaphore(concurrency)`와 `gather`로 병렬 실행하되, `belief_history`와 `trade_log` 저장은 `asyncio.Lock`으로 직렬화했다. Exchange와 portfolio update는 기존처럼 모든 주문 수집 후 순차 처리한다.
+- 왜: LLM 호출 병렬화 이점은 유지하면서 SQLite 동시 쓰기 lock 오류와 로그/상태 경합 위험을 줄이기 위해서다.
+- 영향: `twinmarket_kr/core/daily_cycle.py`, `twinmarket_kr/simulation.py`.
+- 되돌릴 때: `run_agent_turn()`에 넘기는 `db_write_lock`을 제거하면 이전 병렬 write 구조로 돌아간다.
+
+### [D-22] validation 1차 지표를 sign/baseline 중심으로 재정렬  (Simulation Improvement, 2026-06-25)
+- 무엇을: validation summary와 PDF에 `direction_match_rate`, `balanced_accuracy`, `buy_recall`, `sell_recall`, confusion matrix, always-buy/sell, 50:50 random, actual-ratio random, previous-day individual direction, previous-day market return baseline을 추가했다. correlation 계열은 2차 지표로 유지한다.
+- 왜: buy/sell 방향 실험의 1차 질문은 실제 개인투자자 순매수/순매도 sign 예측이며, 단순 일치율은 buy/sell 분포 baseline과 같이 봐야 해석 가능하기 때문이다.
+- 영향: `validation/validate_trading_direction.py`.
+- 되돌릴 때: `metric_bundle()`과 PDF 표 구성을 이전 correlation 중심 출력으로 되돌린다.

@@ -14,19 +14,23 @@
 거래 제약:
 {trading_constraints}
 
+의사결정 공간:
+{decision_space_instruction}
+
 삼성전자(005930)에 대해 오늘의 거래 결정을 JSON으로 작성하세요.
 
 필수 JSON 키:
-- action: "buy", "sell", "hold" 중 하나.
+- action: 거래 제약의 allowed_actions 안에서만 선택.
 - quantity: 정수. hold이면 0.
-- order_type: "market" 또는 "limit".
-- price: market이면 0, limit이면 지정가.
+- order_type: 반드시 "limit"만 사용. 시장가 주문은 금지.
+- price: 지정가. buy/sell이면 0보다 큰 가격을 반드시 작성하고, hold이면 0.
 - reason: 결정 근거.
 - risk_control: 리스크 관리 방침.
 
 가용 현금, 현재 보유 수량, 최소 주문 단위를 반드시 지키세요.
 단일 매수 주문은 거래 제약의 max_single_trade_cash 및 max_buy_quantity를 넘기면 안 됩니다.
 거래 결정은 오늘의 Belief, 거래 전 시장 분석, 현재 포트폴리오, 거래 제약과 일관되어야 합니다.
+주문은 동시호가 실험과 일관되도록 전부 지정가 주문으로 제출합니다. market, 시장가, price=0인 buy/sell 주문은 허용되지 않습니다.
 뉴스나 시장 신호의 확신도가 낮거나 이전 관점 대비 변화가 작으면 과도한 매매를 피하고 hold를 우선 고려하세요.
 reason에는 뉴스, 시장 데이터, 포트폴리오 상태 중 어떤 근거가 핵심인지 명시하세요.
 매수/매도 수량은 보수적으로 정하고, 리스크 관리 방침에는 손실 가능성과 현금/보유 비중 관리 원칙을 포함하세요.

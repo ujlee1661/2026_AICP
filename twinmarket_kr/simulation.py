@@ -43,6 +43,20 @@ def trading_dates_between(
     return dates[:limit] if limit else dates
 
 
+def _stock_trading_dates() -> list[str]:
+    with connect(config.SIM_DB) as conn:
+        rows = conn.execute(
+            "SELECT date FROM StockData WHERE stock_id = ? ORDER BY date",
+            (config.STOCK_CODE,),
+        ).fetchall()
+    return [str(row["date"]) for row in rows]
+
+
+def _previous_date_map() -> dict[str, str]:
+    dates = _stock_trading_dates()
+    return {day: dates[index - 1] for index, day in enumerate(dates) if index > 0}
+
+
 def _daily_news_dates() -> set[str]:
     if not config.DAILY_NEWS_SELECTION_CSV.exists():
         return set()
@@ -60,8 +74,14 @@ async def run_simulation(
     random_seed: int = config.RANDOM_SEED,
     start_date: str | None = None,
     end_date: str | None = None,
+    information_mode: str = "same_day",
+    decision_space: str = "buy_hold_sell",
     balanced_depths: bool = False,
 ) -> None:
+    if information_mode not in {"same_day", "prior_close"}:
+        raise ValueError("information_mode must be 'same_day' or 'prior_close'")
+    if decision_space not in {"buy_hold_sell", "buy_sell_only"}:
+        raise ValueError("decision_space must be 'buy_hold_sell' or 'buy_sell_only'")
     agents = load_agents_from_sys100(config.SYS_100_DB)
     if max_agents:
         all_agents = agents
@@ -73,7 +93,13 @@ async def run_simulation(
         else:
             agents = agents[:max_agents]
         agents = _ensure_depth2_agent(agents, all_agents)
-    dates = trading_dates_between(start_date=start_date, end_date=end_date, limit=max_days)
+    previous_by_date = _previous_date_map()
+    date_limit = None if max_days is None else max_days + (1 if information_mode == "prior_close" else 0)
+    dates = trading_dates_between(start_date=start_date, end_date=end_date, limit=date_limit)
+    if information_mode == "prior_close":
+        dates = [day for day in dates if day in previous_by_date]
+        if max_days:
+            dates = dates[:max_days]
     if not dates:
         raise RuntimeError("No StockData rows found. Run scripts/03_load_stock_data.py first.")
 
@@ -84,6 +110,7 @@ async def run_simulation(
     exchange = ExchangeAgent(config.SIM_DB)
     client = OpenRouterClient()
     semaphore = asyncio.Semaphore(concurrency)
+    db_write_lock = asyncio.Lock()
     logger = (
         SimulationLogger(
             metadata={
@@ -97,6 +124,9 @@ async def run_simulation(
                 "random_seed": random_seed,
                 "start_date": start_date,
                 "end_date": end_date,
+                "information_mode": information_mode,
+                "decision_space": decision_space,
+                "limit_only_orders": True,
                 "balanced_depths": balanced_depths,
                 "agent_ids": [agent["agent_id"] for agent in agents],
                 "agent_depths": {agent["agent_id"]: int(agent.get("news_depth") or 0) for agent in agents},
@@ -106,18 +136,30 @@ async def run_simulation(
         else None
     )
 
-    async def guarded_turn(agent: dict[str, Any], turn: int, day: str) -> dict[str, Any] | None:
+    async def guarded_turn(
+        agent: dict[str, Any],
+        turn: int,
+        day: str,
+        market_features_date: str,
+        news_max_date: str,
+    ) -> dict[str, Any] | None:
         async with semaphore:
             try:
                 return await run_agent_turn(
                     agent,
                     turn=turn,
                     date=day,
+                    market_features_date=market_features_date,
+                    news_max_date=news_max_date,
+                    execution_date=day,
+                    information_mode=information_mode,
+                    decision_space=decision_space,
                     memory_agent=memory,
                     fundamental_agent=fundamental,
                     news_agent=news,
                     client=client,
                     event_logger=logger,
+                    db_write_lock=db_write_lock,
                 )
             except Exception as exc:
                 if logger is not None:
@@ -125,13 +167,26 @@ async def run_simulation(
                 raise
 
     for index, day in enumerate(dates, start=1):
+        if information_mode == "prior_close":
+            market_features_date = previous_by_date[day]
+            news_max_date = previous_by_date[day]
+        else:
+            market_features_date = day
+            news_max_date = day
         orders = [
             order
-            for order in await asyncio.gather(*(guarded_turn(agent, index, day) for agent in agents))
+            for order in await asyncio.gather(
+                *(guarded_turn(agent, index, day, market_features_date, news_max_date) for agent in agents)
+            )
             if order is not None
         ]
         real_price = fundamental.get_market_features(day)["close"]
-        last_price = real_price if index == 1 else fundamental.get_market_features(dates[index - 2])["close"]
+        previous_execution_date = previous_by_date.get(day)
+        last_price = (
+            real_price
+            if previous_execution_date is None
+            else fundamental.get_market_features(previous_execution_date)["close"]
+        )
         results = exchange.process_daily_orders(
             orders,
             {config.STOCK_CODE: real_price},
@@ -159,6 +214,8 @@ async def run_simulation(
                 "run_id": logger.run_id,
                 "agent_count": len(agents),
                 "date_count": len(dates),
+                "information_mode": information_mode,
+                "decision_space": decision_space,
                 "log_dir": str(logger.run_dir),
             },
         )

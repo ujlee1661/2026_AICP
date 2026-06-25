@@ -201,6 +201,93 @@ def direction_match_rate(xs: list[float], ys: list[float], *, ignore_zero: bool 
     return sum(1 for sx, sy in pairs if sx == sy) / len(pairs)
 
 
+def sign_metrics(sim_values: list[float], actual_values: list[float]) -> dict[str, Any]:
+    sim_signs = [sign(value) for value in sim_values]
+    actual_signs = [sign(value) for value in actual_values]
+    pairs = list(zip(sim_signs, actual_signs))
+    confusion = {
+        "actual_buy": {"pred_buy": 0, "pred_sell": 0, "pred_flat": 0},
+        "actual_sell": {"pred_buy": 0, "pred_sell": 0, "pred_flat": 0},
+        "actual_flat": {"pred_buy": 0, "pred_sell": 0, "pred_flat": 0},
+    }
+    actual_key = {1: "actual_buy", -1: "actual_sell", 0: "actual_flat"}
+    pred_key = {1: "pred_buy", -1: "pred_sell", 0: "pred_flat"}
+    for pred, actual in pairs:
+        confusion[actual_key[actual]][pred_key[pred]] += 1
+
+    actual_buy = sum(1 for value in actual_signs if value > 0)
+    actual_sell = sum(1 for value in actual_signs if value < 0)
+    buy_recall = (
+        sum(1 for pred, actual in pairs if actual > 0 and pred > 0) / actual_buy
+        if actual_buy
+        else None
+    )
+    sell_recall = (
+        sum(1 for pred, actual in pairs if actual < 0 and pred < 0) / actual_sell
+        if actual_sell
+        else None
+    )
+    recalls = [value for value in (buy_recall, sell_recall) if value is not None]
+    balanced_accuracy = sum(recalls) / len(recalls) if recalls else None
+    nonzero_pairs = [(pred, actual) for pred, actual in pairs if pred != 0 and actual != 0]
+    nonzero_match = (
+        sum(1 for pred, actual in nonzero_pairs if pred == actual) / len(nonzero_pairs)
+        if nonzero_pairs
+        else None
+    )
+    return {
+        "direction_match_rate": direction_match_rate(sim_values, actual_values),
+        "nonzero_direction_match_rate": nonzero_match,
+        "buy_recall": buy_recall,
+        "sell_recall": sell_recall,
+        "sell_day_recall": sell_recall,
+        "balanced_accuracy": balanced_accuracy,
+        "confusion_matrix": confusion,
+        "actual_direction_counts": {
+            "buy": actual_buy,
+            "sell": actual_sell,
+            "flat": sum(1 for value in actual_signs if value == 0),
+        },
+        "predicted_direction_counts": {
+            "buy": sum(1 for value in sim_signs if value > 0),
+            "sell": sum(1 for value in sim_signs if value < 0),
+            "flat": sum(1 for value in sim_signs if value == 0),
+        },
+    }
+
+
+def baseline_metrics(actual_values: list[float], market_return_values: list[float] | None = None) -> dict[str, Any]:
+    n = len(actual_values)
+    if n == 0:
+        return {}
+    actual_signs = [sign(value) for value in actual_values]
+    buy_ratio = sum(1 for value in actual_signs if value > 0) / n
+    rng_seed = 20260625
+
+    def random_series(prob_buy: float) -> list[float]:
+        import random
+
+        rng = random.Random(rng_seed + int(prob_buy * 1000))
+        return [1.0 if rng.random() < prob_buy else -1.0 for _ in range(n)]
+
+    previous_actual = [0.0]
+    previous_actual.extend(float(value) for value in actual_signs[:-1])
+    previous_market = [0.0 for _ in range(n)]
+    if market_return_values:
+        market_signs = [sign(value) for value in market_return_values]
+        previous_market = [0.0, *[float(value) for value in market_signs[:-1]]][:n]
+
+    baselines = {
+        "always_buy": [1.0] * n,
+        "always_sell": [-1.0] * n,
+        "random_50_50": random_series(0.5),
+        "actual_ratio_random": random_series(buy_ratio),
+        "previous_day_individual_direction": previous_actual,
+        "previous_day_market_return_direction": previous_market,
+    }
+    return {name: sign_metrics(values, actual_values) for name, values in baselines.items()}
+
+
 def load_actual(path: Path) -> dict[str, dict[str, float]]:
     rows = read_csv(path)
     actual: dict[str, dict[str, float]] = {}
@@ -231,12 +318,22 @@ def load_simulation(run_dir: Path, stock_code: str) -> tuple[str, dict[str, dict
             "llm_sell_volume": 0.0,
             "counterside_buy_volume": 0.0,
             "counterside_sell_volume": 0.0,
+            "closing_price": 0.0,
+            "market_return": 0.0,
         }
     )
     if daily_path.exists():
-        for row in read_csv(daily_path):
+        daily_rows = [row for row in read_csv(daily_path) if str(row.get("stock_code") or stock_code) == stock_code]
+        daily_rows.sort(key=lambda row: parse_date(row["date"]))
+        previous_close = None
+        for row in daily_rows:
             if str(row.get("stock_code") or stock_code) == stock_code:
-                daily[parse_date(row["date"])]
+                date = parse_date(row["date"])
+                close = num(row.get("closing_price"))
+                daily[date]["closing_price"] = close
+                if previous_close and previous_close != 0:
+                    daily[date]["market_return"] = (close - previous_close) / previous_close
+                previous_close = close
     for row in fills:
         if str(row.get("stock_code") or stock_code) != stock_code:
             continue
@@ -255,6 +352,14 @@ def load_simulation(run_dir: Path, stock_code: str) -> tuple[str, dict[str, dict
     return run_id, dict(daily)
 
 
+def load_run_metadata(run_dir: Path) -> dict[str, Any]:
+    metadata_path = run_dir / "run_metadata.json"
+    if not metadata_path.exists():
+        return {}
+    with metadata_path.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
 def metric_bundle(sim_values: list[float], actual_values: list[float]) -> dict[str, Any]:
     sim_max_abs = max_abs_normalize(sim_values)
     actual_max_abs = max_abs_normalize(actual_values)
@@ -262,10 +367,10 @@ def metric_bundle(sim_values: list[float], actual_values: list[float]) -> dict[s
     actual_z = z_score_normalize(actual_values)
     sim_cumulative = max_abs_normalize(cumulative(sim_values))
     actual_cumulative = max_abs_normalize(cumulative(actual_values))
+    primary = sign_metrics(sim_values, actual_values)
     return {
         "days": len(sim_values),
-        "direction_match_rate": direction_match_rate(sim_values, actual_values),
-        "nonzero_direction_match_rate": direction_match_rate(sim_values, actual_values, ignore_zero=True),
+        **primary,
         "pearson_correlation": pearson(sim_values, actual_values),
         "cosine_similarity": cosine(sim_values, actual_values),
         "max_abs_normalized": {
@@ -301,6 +406,7 @@ def build_comparison_rows(
             "llm_direction": direction_label(sim[sim_key]),
             "counterside_net": sim[counter_key],
             "counterside_direction": direction_label(sim[counter_key]),
+            "market_return": sim.get("market_return", 0.0),
         }
         for column in ACTUAL_INVESTOR_COLUMNS:
             row[column] = actual_row[column]
@@ -319,10 +425,13 @@ def skip_initial_rows(rows: list[dict[str, Any]], days: int) -> list[dict[str, A
 def summarize_dimension(rows: list[dict[str, Any]], metric_key: str) -> dict[str, Any]:
     llm_values = [num(row["llm_net"]) for row in rows]
     counterside_values = [num(row["counterside_net"]) for row in rows]
+    actual_individuals = [num(row["Individuals"]) for row in rows]
+    market_returns = [num(row.get("market_return")) for row in rows]
     summary: dict[str, Any] = {
         "metric": metric_key,
         "overlap_days": len(rows),
-        "llm_vs_individuals": metric_bundle(llm_values, [num(row["Individuals"]) for row in rows]),
+        "llm_vs_individuals": metric_bundle(llm_values, actual_individuals),
+        "baselines_vs_individuals": baseline_metrics(actual_individuals, market_returns),
         "counterside_vs_investor_groups": {},
     }
     for column in ACTUAL_INVESTOR_COLUMNS:
@@ -448,18 +557,18 @@ def table(data: list[list[Any]], widths: list[float] | None = None) -> Table:
 
 
 def metric_table(title: str, summary: dict[str, Any], styles: dict[str, ParagraphStyle]) -> list[Any]:
-    rows = [["비교", "일수", "방향", "MaxAbs r", "MaxAbs cos", "Z r", "누적 r", "누적 cos"]]
+    rows = [["비교", "일수", "방향", "Balanced", "Buy recall", "Sell recall", "MaxAbs r", "누적 r"]]
     primary = summary["llm_vs_individuals"]
     rows.append(
         [
             "LLM vs 개인",
             primary["days"],
             pct(primary["direction_match_rate"]),
+            pct(primary["balanced_accuracy"]),
+            pct(primary["buy_recall"]),
+            pct(primary["sell_recall"]),
             score_text(primary["max_abs_normalized"]["pearson_correlation"]),
-            score_text(primary["max_abs_normalized"]["cosine_similarity"]),
-            score_text(primary["z_score_normalized"]["pearson_correlation"]),
             score_text(primary["cumulative_max_abs_normalized"]["pearson_correlation"]),
-            score_text(primary["cumulative_max_abs_normalized"]["cosine_similarity"]),
         ]
     )
     for investor, metric in summary["counterside_vs_investor_groups"].items():
@@ -468,19 +577,49 @@ def metric_table(title: str, summary: dict[str, Any], styles: dict[str, Paragrap
                 f"COUNTERSIDE vs {investor}",
                 metric["days"],
                 pct(metric["direction_match_rate"]),
+                pct(metric["balanced_accuracy"]),
+                pct(metric["buy_recall"]),
+                pct(metric["sell_recall"]),
                 score_text(metric["max_abs_normalized"]["pearson_correlation"]),
-                score_text(metric["max_abs_normalized"]["cosine_similarity"]),
-                score_text(metric["z_score_normalized"]["pearson_correlation"]),
                 score_text(metric["cumulative_max_abs_normalized"]["pearson_correlation"]),
-                score_text(metric["cumulative_max_abs_normalized"]["cosine_similarity"]),
             ]
         )
     return [
         para(title, styles["KHeading2"]),
         table(
             [[para(c, styles["KSmall"]) for c in row] for row in rows],
-            [39 * mm, 13 * mm, 18 * mm, 20 * mm, 20 * mm, 18 * mm, 18 * mm, 20 * mm],
+            [39 * mm, 13 * mm, 18 * mm, 19 * mm, 19 * mm, 19 * mm, 19 * mm, 19 * mm],
         ),
+    ]
+
+
+def baseline_table(title: str, summary: dict[str, Any], styles: dict[str, ParagraphStyle]) -> list[Any]:
+    rows = [["Baseline", "방향", "Balanced", "Buy recall", "Sell recall"]]
+    for name, metric in summary.get("baselines_vs_individuals", {}).items():
+        rows.append(
+            [
+                name,
+                pct(metric.get("direction_match_rate")),
+                pct(metric.get("balanced_accuracy")),
+                pct(metric.get("buy_recall")),
+                pct(metric.get("sell_recall")),
+            ]
+        )
+    return [
+        para(title, styles["KHeading2"]),
+        table([[para(c, styles["KSmall"]) for c in row] for row in rows], [55 * mm, 25 * mm, 25 * mm, 25 * mm, 25 * mm]),
+    ]
+
+
+def confusion_table(title: str, metric: dict[str, Any], styles: dict[str, ParagraphStyle]) -> list[Any]:
+    matrix = metric.get("confusion_matrix") or {}
+    rows = [["Actual \\ Pred", "Buy", "Sell", "Flat"]]
+    for actual_key, label in (("actual_buy", "Actual buy"), ("actual_sell", "Actual sell"), ("actual_flat", "Actual flat")):
+        row = matrix.get(actual_key) or {}
+        rows.append([label, row.get("pred_buy", 0), row.get("pred_sell", 0), row.get("pred_flat", 0)])
+    return [
+        para(title, styles["KHeading2"]),
+        table([[para(c, styles["KSmall"]) for c in row] for row in rows], [45 * mm, 25 * mm, 25 * mm, 25 * mm]),
     ]
 
 
@@ -565,7 +704,9 @@ def build_report(
     story.append(para("TwinMarket Korea 거래 방향 검증 보고서", styles["KTitle"]))
     story.append(
         para(
-            f"실행 ID: {run_id} / 로그 위치: {run_dir} / 생성 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"실행 ID: {run_id} / information_mode={summary.get('information_mode', 'unknown')} / "
+            f"limit_only={summary.get('limit_only_orders', 'unknown')} / 로그 위치: {run_dir} / "
+            f"생성 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             styles["KBody"],
         )
     )
@@ -593,10 +734,9 @@ def build_report(
         q_primary = summary["volume"]["llm_vs_individuals"]
         story.append(
             para(
-                "기본 검증은 LLM 에이전트 전체의 일별 순매수/순매도 방향과 실제 개인 투자자(Individuals)의 "
-                "일별 순매수/순매도 방향이 얼마나 자주 일치하는지 본다. 보조 검증으로 COUNTERSIDE가 실제 기관, 외인, "
-                "기타법인 중 어느 쪽 흐름과 가까운지도 비교했다. 규모가 다른 시계열의 양상 비교는 각 주체별 max-abs "
-                "정규화, z-score 정규화, 누적 max-abs 정규화 지표를 사용한다.",
+                "기본 검증은 LLM 에이전트 전체의 일별 순매수/순매도 sign이 실제 개인 투자자(Individuals)의 sign과 "
+                "일치하는지 본다. 1차 지표는 방향 일치율, balanced accuracy, buy/sell recall이며, naive baseline과 "
+                "같은 날짜 구간에서 비교한다. 상관계수와 코사인 유사도는 강도 패턴을 보는 2차 지표로 유지한다.",
                 styles["KBody"],
             )
         )
@@ -604,6 +744,9 @@ def build_report(
             ["항목", "Value", "Volume"],
             ["겹치는 거래일", summary["value"]["overlap_days"], summary["volume"]["overlap_days"]],
             ["LLM vs 개인 방향 일치율", pct(v_primary["direction_match_rate"]), pct(q_primary["direction_match_rate"])],
+            ["Balanced accuracy", pct(v_primary["balanced_accuracy"]), pct(q_primary["balanced_accuracy"])],
+            ["Buy recall", pct(v_primary["buy_recall"]), pct(q_primary["buy_recall"])],
+            ["Sell recall", pct(v_primary["sell_recall"]), pct(q_primary["sell_recall"])],
             [
                 "MaxAbs 정규화 상관계수",
                 score_text(v_primary["max_abs_normalized"]["pearson_correlation"]),
@@ -655,9 +798,13 @@ def build_report(
             )
         )
 
-        story.append(para("2. 지표별 상세 점수", styles["KHeading1"]))
+        story.append(para("2. Sign 지표 및 Baseline", styles["KHeading1"]))
         story.extend(metric_table("Value 기준", summary["value"], styles))
         story.extend(metric_table("Volume 기준", summary["volume"], styles))
+        story.extend(baseline_table("Value baseline 비교", summary["value"], styles))
+        story.extend(baseline_table("Volume baseline 비교", summary["volume"], styles))
+        story.extend(confusion_table("Value confusion matrix: LLM vs Individuals", v_primary, styles))
+        story.extend(confusion_table("Volume confusion matrix: LLM vs Individuals", q_primary, styles))
 
         story.append(PageBreak())
         story.append(para("3. 일별 비교 샘플", styles["KHeading1"]))
@@ -701,6 +848,10 @@ def build_report(
 def make_interpretation(summary: dict[str, Any]) -> str:
     value_match = summary["value"]["llm_vs_individuals"]["direction_match_rate"]
     volume_match = summary["volume"]["llm_vs_individuals"]["direction_match_rate"]
+    value_balanced = summary["value"]["llm_vs_individuals"]["balanced_accuracy"]
+    volume_balanced = summary["volume"]["llm_vs_individuals"]["balanced_accuracy"]
+    value_sell_recall = summary["value"]["llm_vs_individuals"]["sell_recall"]
+    volume_sell_recall = summary["volume"]["llm_vs_individuals"]["sell_recall"]
     value_corr = summary["value"]["llm_vs_individuals"]["max_abs_normalized"]["pearson_correlation"]
     volume_corr = summary["volume"]["llm_vs_individuals"]["max_abs_normalized"]["pearson_correlation"]
     value_cumulative_corr = summary["value"]["llm_vs_individuals"]["cumulative_max_abs_normalized"]["pearson_correlation"]
@@ -722,7 +873,9 @@ def make_interpretation(summary: dict[str, Any]) -> str:
             investor, metric = ranked[0]
             best_counter.append(f"{dimension}: {investor} 방향 일치율 {pct(metric['direction_match_rate'])}")
     return (
-        f"LLM 에이전트와 실제 개인 투자자의 방향 일치율은 Value {pct(value_match)}, Volume {pct(volume_match)}이다. "
+        f"LLM 에이전트와 실제 개인 투자자의 방향 일치율은 Value {pct(value_match)}, Volume {pct(volume_match)}이고, "
+        f"balanced accuracy는 Value {pct(value_balanced)}, Volume {pct(volume_balanced)}이다. "
+        f"sell recall은 Value {pct(value_sell_recall)}, Volume {pct(volume_sell_recall)}이다. "
         f"MaxAbs 정규화 상관계수는 Value {score_text(value_corr)}, Volume {score_text(volume_corr)}이며, "
         f"누적 정규화 상관계수는 Value {score_text(value_cumulative_corr)}, Volume {score_text(volume_cumulative_corr)}이다. "
         "방향 일치율이 높고 정규화 상관계수/코사인 유사도가 양수로 안정적이면 실제 개인 투자자 흐름을 시뮬레이션이 어느 정도 "
@@ -742,6 +895,7 @@ def main() -> None:
         actual_value = load_actual(args.actual_value)
         actual_volume = load_actual(args.actual_volume)
         run_id, simulation = load_simulation(args.run_dir, args.stock_code)
+        run_metadata = load_run_metadata(args.run_dir)
 
         output_dir = args.output_dir or (VALIDATION_DIR / "outputs" / safe_run_name(run_id))
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -758,6 +912,7 @@ def main() -> None:
             "llm_direction",
             "counterside_net",
             "counterside_direction",
+            "market_return",
             *[item for column in ACTUAL_INVESTOR_COLUMNS for item in (column, f"{column}_direction")],
             "llm_matches_individuals",
         ]
@@ -772,6 +927,8 @@ def main() -> None:
             "actual_value": str(args.actual_value.resolve()),
             "actual_volume": str(args.actual_volume.resolve()),
             "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "information_mode": run_metadata.get("information_mode"),
+            "limit_only_orders": run_metadata.get("limit_only_orders"),
             "skip_initial_days": args.skip_initial_days,
             "skipped_value_dates": skipped_value_dates,
             "skipped_volume_dates": skipped_volume_dates,

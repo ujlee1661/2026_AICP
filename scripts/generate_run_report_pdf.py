@@ -94,8 +94,6 @@ def action_ko(action: str) -> str:
 
 
 def order_price_text(row: dict[str, Any]) -> str:
-    if str(row.get("order_type") or "").lower() == "market":
-        return "시장가"
     return money(row.get("price"))
 
 
@@ -118,14 +116,10 @@ def order_book_rows(
     buys = [row for row in day_orders if row.get("direction") == "buy"]
 
     def sell_key(row: dict[str, str]) -> tuple[int, float, str]:
-        if row.get("order_type") == "market":
-            return (0, 0.0, row.get("agent_id", ""))
-        return (1, num(row.get("price")), row.get("agent_id", ""))
+        return (0, num(row.get("price")), row.get("agent_id", ""))
 
     def buy_key(row: dict[str, str]) -> tuple[int, float, str]:
-        if row.get("order_type") == "market":
-            return (0, 0.0, row.get("agent_id", ""))
-        return (1, -num(row.get("price")), row.get("agent_id", ""))
+        return (0, -num(row.get("price")), row.get("agent_id", ""))
 
     sells.sort(key=sell_key)
     buys.sort(key=buy_key)
@@ -356,7 +350,8 @@ def main() -> None:
             "실행 조건",
             f"에이전트 {meta['agent_count']}명, {meta['date_count']}거래일, "
             f"기간={meta.get('start_date') or daily_rows[0]['date']}~{meta.get('end_date') or daily_rows[-1]['date']}, "
-            f"seed={meta['random_seed']}, concurrency={meta['concurrency']}, balanced_depths={meta.get('balanced_depths', False)}",
+            f"seed={meta['random_seed']}, concurrency={meta['concurrency']}, balanced_depths={meta.get('balanced_depths', False)}, "
+            f"information_mode={meta.get('information_mode', 'same_day')}, limit_only={meta.get('limit_only_orders', True)}",
         ],
         ["선택 에이전트", ", ".join(meta["agent_ids"])],
         ["전체 판단", f"총 {len(agent_rows)}건: 매수 {action_counts.get('buy', 0)}건, 보유 {action_counts.get('hold', 0)}건, 매도 {action_counts.get('sell', 0)}건"],
@@ -425,9 +420,14 @@ def main() -> None:
         elif net_qty < 0:
             net_text = f"LLM 순매도 {abs(net_qty):,}주"
         market = rows[0]["context"]["market_features"]
+        context_meta = rows[0]["context"]
         story.append(
             para(
-                f"시장 지표: 종가 {money(day['closing_price'])}, 등락률 {pct(market.get('pct_chg'))}, "
+                f"정보 기준: decision_date={context_meta.get('decision_date', date)}, "
+                f"market_features_date={context_meta.get('market_features_date', date)}, "
+                f"news_max_date={context_meta.get('news_max_date', date)}, "
+                f"execution_date={context_meta.get('execution_date', date)}. "
+                f"시장 지표: 기준 종가 {money(market.get('close'))}, 실행 종가 {money(day['closing_price'])}, 등락률 {pct(market.get('pct_chg'))}, "
                 f"MA5 {money(market.get('ma5'))}, MA20 {money(market.get('ma20'))}. "
                 f"당일 주문 {day['submitted_orders']}건, 체결량 {int(num(day['volume'])):,}주, "
                 f"LLM 매수 체결 {buy_qty:,}주 / 매도 체결 {sell_qty:,}주 / {net_text}.",

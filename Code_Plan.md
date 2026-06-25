@@ -446,6 +446,12 @@ Step 0 (스캐폴딩)
 - 발견한 문제: 실제 smoke/full run은 `stock_data.csv`, 뉴스 전처리 결과, OpenRouter 설정이 없어 아직 실행하지 않았다.
 - 다음 Step 준비: 누락 입력 파일과 `.env`가 준비되면 `scripts/03_load_stock_data.py`, `scripts/02_prepare_news.py`, `scripts/04_generate_initial_beliefs.py`, `scripts/05_run_simulation.py --max-agents 5 --max-days 3` 순서로 smoke를 수행한다.
 
+### 🔁 Simulation Improvement 반영 (2026-06-25)
+- 수행한 것: `Simulation_Improvement_Plan.md` 기준으로 `--information-mode same_day|prior_close`를 추가하고, context에 `decision_date`, `market_features_date`, `news_max_date`, `execution_date`, `information_mode`를 남기도록 수정했다. `prior_close`는 D일 실행 전에 D-1 시장 지표와 D-1 이하 뉴스만 사용한다. decision prompt/parser/exchange를 limit-only로 정리하고, 병렬 agent turn의 DB write에는 lock을 걸었다. report와 validation 출력에는 정보 기준일과 sign/baseline 지표를 반영했다.
+- 핵심 판단: 기존 실험과 비교 가능하도록 기본값은 `same_day`로 유지했다. LLM이 시장가나 0원 가격을 반환하면 주문을 버리지 않고 기준 가격의 limit 주문으로 보정하되 `order_corrections`에 기록한다.
+- 발견한 문제: 시뮬레이션 smoke/full run은 실제 OpenRouter 호출이 필요하므로 이번 검증에서는 실행하지 않았다. 대신 compile, decision parser, exchange guard, 기존 로그 기반 validation/report 재생성을 확인했다.
+- 다음 Step 준비: 새 비교 실험은 `scripts/05_run_simulation.py --information-mode prior_close ...`로 실행하고, `submitted_orders.csv`의 `order_type`과 `order_corrections`, validation의 baseline 표를 확인하면 된다.
+
 ---
 
 *작성 기준: Overall_Framework_Design.md / Persona_Distribution_Design.md / News_System_Design.md / Matching_System_Design.md*
