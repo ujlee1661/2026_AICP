@@ -22,6 +22,10 @@ DEFAULT_DEPTH2_FIELDS = (
     {"field": "반도체 업황", "keywords": ["반도체", "업황", "수출", "장비"]},
     {"field": "거시 수급", "keywords": ["금리", "환율", "외국인", "코스피"]},
 )
+BAD_SUMMARY_MARKERS = {"사진확대", "사진 확대"}
+EXCLUDED_TITLE_PATTERNS = (
+    re.compile(r"^\s*\[?표\]?\s*외국\s*환율\s*고시표?\s*$"),
+)
 
 
 def _select_daily(rows: list[dict[str, Any]], *, seed: int | None = None) -> list[dict[str, Any]]:
@@ -64,6 +68,21 @@ def _summarize(text: str, limit: int = 220) -> str:
     if len(text) <= limit:
         return text
     return text[:limit].rstrip() + "..."
+
+
+def _clean_raw_summary(value: Any) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if re.sub(r"\s+", "", text) in BAD_SUMMARY_MARKERS:
+        return ""
+    text = re.sub(r"\s*사진\s*확대\s*", " ", text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
+    if re.sub(r"\s+", "", text) in BAD_SUMMARY_MARKERS:
+        return ""
+    return text
+
+
+def _is_excluded_title(title: str) -> bool:
+    return any(pattern.search(title) for pattern in EXCLUDED_TITLE_PATTERNS)
 
 
 def _importance(title: str, summary: str, category: str, time_text: str) -> float:
@@ -115,7 +134,7 @@ def prepare_news(
     per_day_counter: dict[str, int] = defaultdict(int)
     for item in _raw_records(raw):
         title = str(item.get("title") or item.get("headline") or "").strip()
-        if not title:
+        if not title or _is_excluded_title(title):
             continue
         date_text = str(item.get("date") or item.get("published_date") or item.get("datetime") or "")[:10]
         if not date_text:
@@ -127,7 +146,9 @@ def prepare_news(
         raw_time = str(item.get("time") or item.get("published_time") or item.get("datetime") or "")
         time_match = re.search(r"\d{2}:\d{2}", raw_time)
         time_text = time_match.group(0) if time_match else ""
-        content = item.get("summary") or item.get("content") or item.get("body") or ""
+        content = _clean_raw_summary(item.get("summary") or item.get("content") or "")
+        if not content:
+            continue
         summary = _summarize(str(content))
         category = _normalize_category(str(item.get("category") or item.get("type") or ""), title, summary)
         per_day_counter[date_text] += 1

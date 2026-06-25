@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import sys
 import io
+import re
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -54,6 +55,10 @@ PROGRESS_MD = DATA_DIR / "collection_progress.md"
 # pkl 저장 컬럼 순서 (prepare_news 호환: title/date/time/category/summary/body 모두 인식)
 COLUMNS = ["date", "time", "title", "category", "summary", "body", "source", "url"]
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
+BAD_SUMMARY_MARKERS = {"사진확대", "사진 확대"}
+EXCLUDED_TITLE_PATTERNS = (
+    re.compile(r"^\s*\[?표\]?\s*외국\s*환율\s*고시표?\s*$"),
+)
 
 
 # ── 날짜 헬퍼 ────────────────────────────────────────────────────────────────
@@ -79,6 +84,34 @@ def load_pkl(path: Path) -> pd.DataFrame:
 def save_pkl(df: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_pickle(path)
+
+
+def clean_summary(value: object) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if re.sub(r"\s+", "", text) in BAD_SUMMARY_MARKERS:
+        return ""
+    text = re.sub(r"\s*사진\s*확대\s*", " ", text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
+    if re.sub(r"\s+", "", text) in BAD_SUMMARY_MARKERS:
+        return ""
+    return text
+
+
+def is_excluded_title(title: object) -> bool:
+    text = str(title or "").strip()
+    return any(pattern.search(text) for pattern in EXCLUDED_TITLE_PATTERNS)
+
+
+def clean_news_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    cleaned = df.copy()
+    if "summary" in cleaned.columns:
+        cleaned["summary"] = cleaned["summary"].map(clean_summary)
+        cleaned = cleaned[cleaned["summary"].astype(str).str.strip().ne("")]
+    if "title" in cleaned.columns:
+        cleaned = cleaned[~cleaned["title"].map(is_excluded_title)]
+    return cleaned
 
 
 def collected_dates() -> set[str]:
@@ -152,7 +185,7 @@ def summarize_day(rows_by_cat: dict[str, list[dict]]) -> None:
         bodies = [r["body"] for r in rows]
         summaries = summarize_articles(bodies, category=category)
         for r, s in zip(rows, summaries):
-            r["summary"] = s
+            r["summary"] = clean_summary(s)
     print("완료")
 
 
@@ -164,6 +197,7 @@ def append_to_pkl(rows_by_cat: dict[str, list[dict]]) -> None:
         pkl_path = PKL_MAP[cat]
         existing = load_pkl(pkl_path)
         combined = pd.concat([existing, pd.DataFrame(rows)], ignore_index=True)
+        combined = clean_news_df(combined)
         combined = combined.drop_duplicates(subset=["url"])
         # 컬럼 순서 정렬 (없는 컬럼 보강)
         for col in COLUMNS:
@@ -184,6 +218,7 @@ def rebuild_merged_pkl() -> dict[str, int]:
             frames.append(df)
     if frames:
         merged = pd.concat(frames, ignore_index=True)
+        merged = clean_news_df(merged)
         merged = merged.drop_duplicates(subset=["url"])
         merged = merged.sort_values(["date", "category", "time"]).reset_index(drop=True)
         # prepare_news 는 list of dict 를 기대하므로 records 로 저장

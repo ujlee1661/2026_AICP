@@ -29,9 +29,7 @@ BEHAVIORAL_COLUMNS = [
     "bh_disposition_effect_category",
     "bh_lottery_preference_category",
     "bh_total_return_category",
-    "bh_annual_turnover_category",
     "bh_underdiversification_category",
-    "trade_count_category",
     "strategy",
     "trad_pro",
     "fol_ind",
@@ -143,16 +141,6 @@ def generate_persona_prompt(agent: dict) -> str:
         "medium": "과거 투자 성과가 평균적인 편입니다",
         "low": "과거 투자 성과가 낮은 편입니다",
     }
-    turnover_desc = {
-        "high": "자주 매매하며 단기 기회에 민감하게 반응합니다",
-        "medium": "중간 정도의 거래 빈도를 보입니다",
-        "low": "장기 보유를 선호하며 불필요한 매매를 자제합니다",
-    }
-    count_desc = {
-        "high": "거래 실행 빈도가 높습니다",
-        "medium": "거래 실행 빈도가 보통입니다",
-        "low": "거래 실행 빈도가 낮습니다",
-    }
     strategy_desc = {
         "technical": "기술적 지표, 추세, 거래량, 이동평균, 돌파 신호를 기반으로 판단합니다",
         "value": "PE/PB 등 가치평가 지표, 내재가치, 성장성, 저평가 여부를 기반으로 판단합니다",
@@ -181,8 +169,6 @@ def generate_persona_prompt(agent: dict) -> str:
         f"처분효과 측면에서는 {disposition_desc[agent['bh_disposition_effect_category']]}.\n"
         f"위험 자산 선호 측면에서는 {lottery_desc[agent['bh_lottery_preference_category']]}.\n"
         f"성과 경험 측면에서는 {return_desc[agent['bh_total_return_category']]}.\n"
-        f"거래 회전율 측면에서는 {turnover_desc[agent['bh_annual_turnover_category']]}.\n"
-        f"거래 빈도 측면에서는 {count_desc[agent['trade_count_category']]}.\n"
         f"분산투자 측면에서는 {underdiv_desc[agent['bh_underdiversification_category']]}.\n"
         f"{depth_line}\n"
         "이번 실험에서는 삼성전자 단일 자산만 거래하며, "
@@ -237,9 +223,7 @@ def save_sys_100(agents: Iterable[dict], output_db: Path = config.SYS_100_DB) ->
         "bh_disposition_effect_category",
         "bh_lottery_preference_category",
         "bh_total_return_category",
-        "bh_annual_turnover_category",
         "bh_underdiversification_category",
-        "trade_count_category",
         "strategy",
         "trad_pro",
         "fol_ind",
@@ -263,17 +247,6 @@ def verify_distribution(agents: list[dict]) -> dict:
     depth = Counter(agent["news_depth"] for agent in agents)
     prompt_errors = [agent["agent_id"] for agent in agents if not agent.get("persona_prompt")]
 
-    turnover_rank = {"low": 1, "medium": 2, "high": 3}
-    young_male = [
-        turnover_rank[agent["bh_annual_turnover_category"]]
-        for agent in agents
-        if agent["gender"] == "male" and agent["age_group"] in {"20대", "30대"}
-    ]
-    senior = [
-        turnover_rank[agent["bh_annual_turnover_category"]]
-        for agent in agents
-        if agent["age_group"] in {"60대", "70대", "80대 이상"}
-    ]
     segment_scores: dict[str, list[int]] = defaultdict(list)
     for agent in agents:
         segment_scores[agent["segment_key"]].append(agent["match_score"])
@@ -293,8 +266,6 @@ def verify_distribution(agents: list[dict]) -> dict:
         and dict(age_group) == expected["age_group"]
         and dict(cash) == expected["cash"],
         "prompt_errors": prompt_errors,
-        "young_male_avg_turnover": round(sum(young_male) / len(young_male), 3) if young_male else None,
-        "senior_avg_turnover": round(sum(senior) / len(senior), 3) if senior else None,
         "segment_avg_scores": {
             key: round(sum(values) / len(values), 3) for key, values in sorted(segment_scores.items())
         },

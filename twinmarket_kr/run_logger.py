@@ -283,7 +283,6 @@ class SimulationLogger:
             "age",
             "gender",
             "strategy",
-            "trade_count_category",
             "news_depth",
             "segment_key",
         ]

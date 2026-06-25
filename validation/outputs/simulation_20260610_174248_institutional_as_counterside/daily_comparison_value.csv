@@ -1,7 +1,4 @@
 ﻿date,llm_net,llm_direction,counterside_net,counterside_direction,Individuals,Individuals_direction,Subtotal-Institutions,Subtotal-Institutions_direction,Total of foreign,Total of foreign_direction,Other corporations,Other corporations_direction,llm_matches_individuals
-2025-02-11,1578085000.0,net_buy,0.0,flat,-201080109000.0,net_sell,151464802900.0,net_buy,40037165000.0,net_buy,9578141100.0,net_buy,0
-2025-02-12,111625000.0,net_buy,0.0,flat,-54173023100.0,net_sell,-356133811484.0,net_sell,381646656084.0,net_buy,28660178500.0,net_buy,0
-2025-02-13,186770200.0,net_buy,0.0,flat,-26383401700.0,net_sell,108353145200.0,net_buy,-114256919200.0,net_sell,32287175700.0,net_buy,0
 2025-02-14,-13776000.0,net_sell,13776000.0,net_buy,-106590531700.0,net_sell,163619030800.0,net_buy,-51177779000.0,net_sell,-5850720100.0,net_sell,1
 2025-02-17,33600000.0,net_buy,-33600000.0,net_sell,22492322700.0,net_buy,49243524400.0,net_buy,-71416090800.0,net_sell,-319756300.0,net_sell,1
 2025-02-18,292295300.0,net_buy,-292295300.0,net_sell,-188257255500.0,net_sell,56476823200.0,net_buy,133144361100.0,net_buy,-1363928800.0,net_sell,0

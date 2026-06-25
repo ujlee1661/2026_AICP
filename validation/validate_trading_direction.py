@@ -55,6 +55,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actual-volume", type=Path, default=VALIDATION_DIR / "data_trading_volume.csv")
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--stock-code", default="005930")
+    parser.add_argument(
+        "--skip-initial-days",
+        type=int,
+        default=3,
+        help="Exclude the first N overlapping trading days from validation metrics and charts.",
+    )
     return parser.parse_args()
 
 
@@ -302,6 +308,12 @@ def build_comparison_rows(
         row["llm_matches_individuals"] = int(sign(sim[sim_key]) == sign(actual_row["Individuals"]))
         rows.append(row)
     return rows
+
+
+def skip_initial_rows(rows: list[dict[str, Any]], days: int) -> list[dict[str, Any]]:
+    if days <= 0:
+        return rows
+    return rows[days:]
 
 
 def summarize_dimension(rows: list[dict[str, Any]], metric_key: str) -> dict[str, Any]:
@@ -557,6 +569,14 @@ def build_report(
             styles["KBody"],
         )
     )
+    skipped_days = int(summary.get("skip_initial_days") or 0)
+    if skipped_days:
+        story.append(
+            para(
+                f"검증 기준: COUNTERSIDE가 개입하지 않는 초기 warmup {skipped_days}거래일을 제외하고 비교했다.",
+                styles["KBody"],
+            )
+        )
     overlap_days = summary["value"]["overlap_days"]
     if overlap_days == 0:
         story.append(para("1. 검증 결과", styles["KHeading1"]))
@@ -728,6 +748,10 @@ def main() -> None:
 
         value_rows = build_comparison_rows(label="value", actual=actual_value, simulation=simulation)
         volume_rows = build_comparison_rows(label="volume", actual=actual_volume, simulation=simulation)
+        skipped_value_dates = [row["date"] for row in value_rows[: args.skip_initial_days]]
+        skipped_volume_dates = [row["date"] for row in volume_rows[: args.skip_initial_days]]
+        value_rows = skip_initial_rows(value_rows, args.skip_initial_days)
+        volume_rows = skip_initial_rows(volume_rows, args.skip_initial_days)
         fieldnames = [
             "date",
             "llm_net",
@@ -748,6 +772,9 @@ def main() -> None:
             "actual_value": str(args.actual_value.resolve()),
             "actual_volume": str(args.actual_volume.resolve()),
             "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "skip_initial_days": args.skip_initial_days,
+            "skipped_value_dates": skipped_value_dates,
+            "skipped_volume_dates": skipped_volume_dates,
             "value": summarize_dimension(value_rows, "value"),
             "volume": summarize_dimension(volume_rows, "volume"),
         }

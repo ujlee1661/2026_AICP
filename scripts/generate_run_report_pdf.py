@@ -93,6 +93,62 @@ def action_ko(action: str) -> str:
     return {"buy": "매수", "sell": "매도", "hold": "보유"}.get(action, action)
 
 
+def order_price_text(row: dict[str, Any]) -> str:
+    if str(row.get("order_type") or "").lower() == "market":
+        return "시장가"
+    return money(row.get("price"))
+
+
+def fill_result_text(fills: list[dict[str, Any]]) -> str:
+    if not fills:
+        return "미체결"
+    return " / ".join(
+        f"{int(num(fill.get('executed_quantity'))):,}주@{money(fill.get('executed_price'))}"
+        for fill in fills
+    )
+
+
+def order_book_rows(
+    date: str,
+    orders_by_date: dict[str, list[dict[str, str]]],
+    fills_by_order: dict[tuple[str, str, str], list[dict[str, str]]],
+) -> list[list[str]]:
+    day_orders = orders_by_date.get(date, [])
+    sells = [row for row in day_orders if row.get("direction") == "sell"]
+    buys = [row for row in day_orders if row.get("direction") == "buy"]
+
+    def sell_key(row: dict[str, str]) -> tuple[int, float, str]:
+        if row.get("order_type") == "market":
+            return (0, 0.0, row.get("agent_id", ""))
+        return (1, num(row.get("price")), row.get("agent_id", ""))
+
+    def buy_key(row: dict[str, str]) -> tuple[int, float, str]:
+        if row.get("order_type") == "market":
+            return (0, 0.0, row.get("agent_id", ""))
+        return (1, -num(row.get("price")), row.get("agent_id", ""))
+
+    sells.sort(key=sell_key)
+    buys.sort(key=buy_key)
+    row_count = max(len(sells), len(buys), 1)
+    rows = [["매도 주문", "매도 호가", "매도 체결", "매수 호가", "매수 주문", "매수 체결"]]
+    for idx in range(row_count):
+        sell = sells[idx] if idx < len(sells) else None
+        buy = buys[idx] if idx < len(buys) else None
+        sell_fills = fills_by_order.get((date, sell["agent_id"], "sell"), []) if sell else []
+        buy_fills = fills_by_order.get((date, buy["agent_id"], "buy"), []) if buy else []
+        rows.append(
+            [
+                f"{sell['agent_id']} {int(num(sell.get('quantity'))):,}주" if sell else "",
+                order_price_text(sell) if sell else "",
+                fill_result_text(sell_fills) if sell else "",
+                order_price_text(buy) if buy else "",
+                f"{buy['agent_id']} {int(num(buy.get('quantity'))):,}주" if buy else "",
+                fill_result_text(buy_fills) if buy else "",
+            ]
+        )
+    return rows
+
+
 def para(text: Any, style: ParagraphStyle) -> Paragraph:
     safe = str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return Paragraph(safe.replace("\n", "<br/>"), style)
@@ -263,9 +319,16 @@ def main() -> None:
 
     fills_by_date = defaultdict(list)
     fills_by_agent = defaultdict(list)
+    fills_by_order = defaultdict(list)
     for row in fill_rows:
         fills_by_date[row["date"]].append(row)
         fills_by_agent[row["user_id"]].append(row)
+        if row["user_id"] not in {"COUNTERSIDE", "INSTITUTIONAL"}:
+            fills_by_order[(row["date"], row["user_id"], row["direction"])].append(row)
+
+    orders_by_date = defaultdict(list)
+    for row in order_rows:
+        orders_by_date[row["date"]].append(row)
 
     final_close = num(daily_rows[-1]["closing_price"])
     initial_values = load_initial_values(list(meta["agent_ids"]))
@@ -304,16 +367,28 @@ def main() -> None:
     story.append(table([[para(c, styles["KSmall"]) for c in row] for row in overview], [35 * mm, 135 * mm]))
 
     story.append(para("2. 일자별 전체 거래 현황", styles["KHeading1"]))
-    daily_table = [["일자", "종가", "주문", "체결량", "체결건", "매수/보유", "해석"]]
+    daily_table = [["일자", "종가", "주문", "체결", "순방향", "판단 분포", "해석"]]
     for row in daily_rows:
         date = row["date"]
         turns = by_date[date]
         counts = Counter(t["decision"]["action"] for t in turns)
+        day_orders = orders_by_date.get(date, [])
+        order_counts = Counter(order["direction"] for order in day_orders)
+        agent_fills = [fill for fill in fills_by_date.get(date, []) if fill["user_id"] not in {"COUNTERSIDE", "INSTITUTIONAL"}]
+        buy_qty = sum(int(num(fill["executed_quantity"])) for fill in agent_fills if fill["direction"] == "buy")
+        sell_qty = sum(int(num(fill["executed_quantity"])) for fill in agent_fills if fill["direction"] == "sell")
+        net_qty = buy_qty - sell_qty
+        if net_qty > 0:
+            net_text = f"순매수 {net_qty:,}주"
+        elif net_qty < 0:
+            net_text = f"순매도 {abs(net_qty):,}주"
+        else:
+            net_text = "중립"
         sentiments = Counter(t["news_interpretation"].get("news_sentiment", "") for t in turns)
         main_sentiment = sentiments.most_common(1)[0][0] if sentiments else ""
         note = (
             f"뉴스 감성은 {main_sentiment} 중심. "
-            f"매수 {counts.get('buy', 0)}명, 보유 {counts.get('hold', 0)}명. "
+            f"주문은 매수 {order_counts.get('buy', 0)}건, 매도 {order_counts.get('sell', 0)}건. "
         )
         if num(row["volume"]) == 0:
             note += "제출 주문은 있었지만 당일 체결은 발생하지 않음."
@@ -325,14 +400,14 @@ def main() -> None:
             [
                 date,
                 money(row["closing_price"]),
-                row["submitted_orders"],
-                f"{int(num(row['volume'])):,}주",
-                row["fill_count"],
-                f"매수 {counts.get('buy', 0)} / 보유 {counts.get('hold', 0)}",
+                f"매수 {order_counts.get('buy', 0)} / 매도 {order_counts.get('sell', 0)}",
+                f"{int(num(row['volume'])):,}주 / {row['fill_count']}건",
+                net_text,
+                f"매수 {counts.get('buy', 0)} / 보유 {counts.get('hold', 0)} / 매도 {counts.get('sell', 0)}",
                 note,
             ]
         )
-    story.append(table([[para(c, styles["KSmall"]) for c in row] for row in daily_table], [22 * mm, 23 * mm, 15 * mm, 20 * mm, 15 * mm, 26 * mm, 49 * mm]))
+    story.append(table([[para(c, styles["KSmall"]) for c in row] for row in daily_table], [20 * mm, 20 * mm, 25 * mm, 23 * mm, 22 * mm, 34 * mm, 34 * mm]))
 
     story.append(para("3. 일자별 상세 분석", styles["KHeading1"]))
     for day in daily_rows:
@@ -340,19 +415,31 @@ def main() -> None:
         rows = by_date[date]
         fills = fills_by_date.get(date, [])
         story.append(para(f"{date} / Turn {day['turn']}", styles["KHeading2"]))
-        fill_text = "체결 없음"
-        if fills:
-            fill_text = ", ".join(
-                f"{f['user_id']} {action_ko(f['direction'])} {int(num(f['executed_quantity'])):,}주@{money(f['executed_price'])}"
-                for f in fills
-            )
+        agent_fills = [fill for fill in fills if fill["user_id"] not in {"COUNTERSIDE", "INSTITUTIONAL"}]
+        buy_qty = sum(int(num(fill["executed_quantity"])) for fill in agent_fills if fill["direction"] == "buy")
+        sell_qty = sum(int(num(fill["executed_quantity"])) for fill in agent_fills if fill["direction"] == "sell")
+        net_qty = buy_qty - sell_qty
+        net_text = "중립"
+        if net_qty > 0:
+            net_text = f"LLM 순매수 {net_qty:,}주"
+        elif net_qty < 0:
+            net_text = f"LLM 순매도 {abs(net_qty):,}주"
         market = rows[0]["context"]["market_features"]
         story.append(
             para(
                 f"시장 지표: 종가 {money(day['closing_price'])}, 등락률 {pct(market.get('pct_chg'))}, "
                 f"MA5 {money(market.get('ma5'))}, MA20 {money(market.get('ma20'))}. "
-                f"당일 주문 {day['submitted_orders']}건, 체결량 {int(num(day['volume'])):,}주, 체결 내역: {fill_text}",
+                f"당일 주문 {day['submitted_orders']}건, 체결량 {int(num(day['volume'])):,}주, "
+                f"LLM 매수 체결 {buy_qty:,}주 / 매도 체결 {sell_qty:,}주 / {net_text}.",
                 styles["KBody"],
+            )
+        )
+        story.append(para("당일 주문장", styles["KHeading2"]))
+        book_rows = order_book_rows(date, orders_by_date, fills_by_order)
+        story.append(
+            table(
+                [[para(c, styles["KSmall"]) for c in row] for row in book_rows],
+                [30 * mm, 24 * mm, 30 * mm, 24 * mm, 30 * mm, 30 * mm],
             )
         )
         news_titles = []
@@ -403,7 +490,7 @@ def main() -> None:
             KeepTogether(
                 [
                     para(
-                        f"{agent_id} ({profile['gender']}, {profile['age']}세, 전략={profile['strategy']}, 거래빈도={profile['trade_count_category']})",
+                        f"{agent_id} ({profile['gender']}, {profile['age']}세, 전략={profile['strategy']})",
                         styles["KHeading2"],
                     ),
                     para(
@@ -416,22 +503,30 @@ def main() -> None:
             )
         )
         flow = [["일자", "관점/생각", "판단", "결과"]]
-        agent_fills = {(f["date"], int(num(f["executed_quantity"])), f["direction"]) for f in fills_by_agent.get(agent_id, [])}
         for turn in rows:
             decision = turn["decision"]
             action = action_ko(decision["action"])
             qty = int(num(decision.get("quantity")))
+            order_desc = "주문 없음"
             result = "미체결/주문 없음"
             matched = [f for f in fills_by_agent.get(agent_id, []) if f["date"] == turn["date"]]
-            if matched:
-                result = "; ".join(f"{action_ko(f['direction'])} {int(num(f['executed_quantity'])):,}주 체결@{money(f['executed_price'])}" for f in matched)
-            elif decision["action"] == "hold":
+            if decision["action"] == "hold":
+                order_desc = "보유"
                 result = "보유 유지"
+            else:
+                order_desc = f"{action} {qty:,}주@{order_price_text(decision)}"
+                if matched:
+                    result = "; ".join(
+                        f"{action_ko(f['direction'])} {int(num(f['executed_quantity'])):,}주 체결@{money(f['executed_price'])}"
+                        for f in matched
+                    )
+                else:
+                    result = "미체결"
             flow.append(
                 [
                     turn["date"],
                     short(turn["belief"].get("belief_summary"), 240),
-                    f"{action} {qty:,}주. {short(decision.get('reason'), 220)}",
+                    f"{order_desc}. {short(decision.get('reason'), 220)}",
                     result,
                 ]
             )

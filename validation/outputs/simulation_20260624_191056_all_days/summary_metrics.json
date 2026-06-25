@@ -1,0 +1,212 @@
+{
+  "run_id": "simulation_20260624_191056",
+  "run_dir": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/outputs/logs/simulation_20260624_191056",
+  "actual_value": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/validation/data_trading_value.csv",
+  "actual_volume": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/validation/data_trading_volume.csv",
+  "generated_at": "2026-06-24T20:00:11",
+  "skip_initial_days": 0,
+  "skipped_value_dates": [],
+  "skipped_volume_dates": [],
+  "value": {
+    "metric": "value",
+    "overlap_days": 15,
+    "llm_vs_individuals": {
+      "days": 15,
+      "direction_match_rate": 0.06666666666666667,
+      "nonzero_direction_match_rate": 0.14285714285714285,
+      "pearson_correlation": -0.27464193997982056,
+      "cosine_similarity": -0.33949224319183563,
+      "max_abs_normalized": {
+        "pearson_correlation": -0.27464193997982056,
+        "cosine_similarity": -0.3394922431918356
+      },
+      "z_score_normalized": {
+        "pearson_correlation": -0.2746419399798205,
+        "cosine_similarity": -0.2746419399798205
+      },
+      "cumulative_max_abs_normalized": {
+        "pearson_correlation": -0.7027398373242515,
+        "cosine_similarity": -0.9514619484426878
+      }
+    },
+    "counterside_vs_investor_groups": {
+      "Individuals": {
+        "days": 15,
+        "direction_match_rate": 0.2,
+        "nonzero_direction_match_rate": 0.75,
+        "pearson_correlation": 0.08394986713234724,
+        "cosine_similarity": 0.1627771729883719,
+        "max_abs_normalized": {
+          "pearson_correlation": 0.08394986713234723,
+          "cosine_similarity": 0.16277717298837194
+        },
+        "z_score_normalized": {
+          "pearson_correlation": 0.08394986713234723,
+          "cosine_similarity": 0.08394986713234723
+        },
+        "cumulative_max_abs_normalized": {
+          "pearson_correlation": 0.6919843741343243,
+          "cosine_similarity": 0.8750365919445349
+        }
+      },
+      "Subtotal-Institutions": {
+        "days": 15,
+        "direction_match_rate": 0.13333333333333333,
+        "nonzero_direction_match_rate": 0.5,
+        "pearson_correlation": 0.04521350454665537,
+        "cosine_similarity": 0.044999156557963396,
+        "max_abs_normalized": {
+          "pearson_correlation": 0.04521350454665536,
+          "cosine_similarity": 0.044999156557963396
+        },
+        "z_score_normalized": {
+          "pearson_correlation": 0.04521350454665537,
+          "cosine_similarity": 0.04521350454665537
+        },
+        "cumulative_max_abs_normalized": {
+          "pearson_correlation": -0.36307802108437365,
+          "cosine_similarity": -0.6843942662432695
+        }
+      },
+      "Total of foreign": {
+        "days": 15,
+        "direction_match_rate": 0.0,
+        "nonzero_direction_match_rate": 0.0,
+        "pearson_correlation": -0.09821024221285272,
+        "cosine_similarity": -0.09733080299510856,
+        "max_abs_normalized": {
+          "pearson_correlation": -0.09821024221285275,
+          "cosine_similarity": -0.09733080299510855
+        },
+        "z_score_normalized": {
+          "pearson_correlation": -0.09821024221285272,
+          "cosine_similarity": -0.09821024221285274
+        },
+        "cumulative_max_abs_normalized": {
+          "pearson_correlation": 0.033695261881011254,
+          "cosine_similarity": -0.6636523242897211
+        }
+      },
+      "Other corporations": {
+        "days": 15,
+        "direction_match_rate": 0.06666666666666667,
+        "nonzero_direction_match_rate": 0.25,
+        "pearson_correlation": -0.26279524199686954,
+        "cosine_similarity": -0.4688746823086016,
+        "max_abs_normalized": {
+          "pearson_correlation": -0.26279524199686954,
+          "cosine_similarity": -0.4688746823086015
+        },
+        "z_score_normalized": {
+          "pearson_correlation": -0.26279524199686954,
+          "cosine_similarity": -0.26279524199686954
+        },
+        "cumulative_max_abs_normalized": {
+          "pearson_correlation": -0.9353081638705292,
+          "cosine_similarity": -0.9719218612622033
+        }
+      }
+    }
+  },
+  "volume": {
+    "metric": "volume",
+    "overlap_days": 15,
+    "llm_vs_individuals": {
+      "days": 15,
+      "direction_match_rate": 0.06666666666666667,
+      "nonzero_direction_match_rate": 0.14285714285714285,
+      "pearson_correlation": -0.2860192375110888,
+      "cosine_similarity": -0.3452693626652506,
+      "max_abs_normalized": {
+        "pearson_correlation": -0.28601923751108876,
+        "cosine_similarity": -0.3452693626652506
+      },
+      "z_score_normalized": {
+        "pearson_correlation": -0.2860192375110888,
+        "cosine_similarity": -0.2860192375110888
+      },
+      "cumulative_max_abs_normalized": {
+        "pearson_correlation": -0.687987769846758,
+        "cosine_similarity": -0.950024272114944
+      }
+    },
+    "counterside_vs_investor_groups": {
+      "Individuals": {
+        "days": 15,
+        "direction_match_rate": 0.2,
+        "nonzero_direction_match_rate": 0.75,
+        "pearson_correlation": 0.08505147261736172,
+        "cosine_similarity": 0.16058607304137945,
+        "max_abs_normalized": {
+          "pearson_correlation": 0.08505147261736169,
+          "cosine_similarity": 0.16058607304137942
+        },
+        "z_score_normalized": {
+          "pearson_correlation": 0.0850514726173617,
+          "cosine_similarity": 0.0850514726173617
+        },
+        "cumulative_max_abs_normalized": {
+          "pearson_correlation": 0.6766592709916079,
+          "cosine_similarity": 0.8706105889912327
+        }
+      },
+      "Subtotal-Institutions": {
+        "days": 15,
+        "direction_match_rate": 0.13333333333333333,
+        "nonzero_direction_match_rate": 0.5,
+        "pearson_correlation": 0.04032224947083457,
+        "cosine_similarity": 0.043628215014651,
+        "max_abs_normalized": {
+          "pearson_correlation": 0.04032224947083458,
+          "cosine_similarity": 0.043628215014650994
+        },
+        "z_score_normalized": {
+          "pearson_correlation": 0.040322249470834584,
+          "cosine_similarity": 0.040322249470834584
+        },
+        "cumulative_max_abs_normalized": {
+          "pearson_correlation": -0.3478955581291902,
+          "cosine_similarity": -0.6666826849119485
+        }
+      },
+      "Total of foreign": {
+        "days": 15,
+        "direction_match_rate": 0.0,
+        "nonzero_direction_match_rate": 0.0,
+        "pearson_correlation": -0.09687064215546545,
+        "cosine_similarity": -0.0945835245096629,
+        "max_abs_normalized": {
+          "pearson_correlation": -0.09687064215546545,
+          "cosine_similarity": -0.09458352450966288
+        },
+        "z_score_normalized": {
+          "pearson_correlation": -0.09687064215546548,
+          "cosine_similarity": -0.09687064215546548
+        },
+        "cumulative_max_abs_normalized": {
+          "pearson_correlation": 0.05906277975516124,
+          "cosine_similarity": -0.6553686250625593
+        }
+      },
+      "Other corporations": {
+        "days": 15,
+        "direction_match_rate": 0.06666666666666667,
+        "nonzero_direction_match_rate": 0.25,
+        "pearson_correlation": -0.2408957562834117,
+        "cosine_similarity": -0.4577977006772695,
+        "max_abs_normalized": {
+          "pearson_correlation": -0.2408957562834117,
+          "cosine_similarity": -0.45779770067726944
+        },
+        "z_score_normalized": {
+          "pearson_correlation": -0.24089575628341167,
+          "cosine_similarity": -0.24089575628341167
+        },
+        "cumulative_max_abs_normalized": {
+          "pearson_correlation": -0.9327025975645676,
+          "cosine_similarity": -0.9708655062766302
+        }
+      }
+    }
+  }
+}

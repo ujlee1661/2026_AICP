@@ -3,205 +3,216 @@
   "run_dir": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/validation/tmp/simulation_20260610_174248_institutional_as_counterside",
   "actual_value": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/validation/data_trading_value.csv",
   "actual_volume": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/validation/data_trading_volume.csv",
-  "generated_at": "2026-06-22T13:36:54",
+  "generated_at": "2026-06-24T18:36:08",
+  "skip_initial_days": 3,
+  "skipped_value_dates": [
+    "2025-02-11",
+    "2025-02-12",
+    "2025-02-13"
+  ],
+  "skipped_volume_dates": [
+    "2025-02-11",
+    "2025-02-12",
+    "2025-02-13"
+  ],
   "value": {
     "metric": "value",
-    "overlap_days": 15,
+    "overlap_days": 12,
     "llm_vs_individuals": {
-      "days": 15,
-      "direction_match_rate": 0.4666666666666667,
-      "nonzero_direction_match_rate": 0.4666666666666667,
-      "pearson_correlation": -0.4773436980318043,
-      "cosine_similarity": -0.5107116684452421,
+      "days": 12,
+      "direction_match_rate": 0.5833333333333334,
+      "nonzero_direction_match_rate": 0.5833333333333334,
+      "pearson_correlation": -0.7474463182920194,
+      "cosine_similarity": -0.6178428968621107,
       "max_abs_normalized": {
-        "pearson_correlation": -0.4773436980318043,
-        "cosine_similarity": -0.5107116684452422
+        "pearson_correlation": -0.7474463182920194,
+        "cosine_similarity": -0.6178428968621107
       },
       "z_score_normalized": {
-        "pearson_correlation": -0.47734369803180426,
-        "cosine_similarity": -0.47734369803180426
+        "pearson_correlation": -0.7474463182920195,
+        "cosine_similarity": -0.7474463182920195
       },
       "cumulative_max_abs_normalized": {
-        "pearson_correlation": -0.7017287354296885,
-        "cosine_similarity": -0.9494552356921546
+        "pearson_correlation": -0.46452607982432387,
+        "cosine_similarity": -0.8704696440245168
       }
     },
     "counterside_vs_investor_groups": {
       "Individuals": {
-        "days": 15,
-        "direction_match_rate": 0.3333333333333333,
+        "days": 12,
+        "direction_match_rate": 0.4166666666666667,
         "nonzero_direction_match_rate": 0.4166666666666667,
-        "pearson_correlation": 0.5903698898268148,
-        "cosine_similarity": 0.5852297677740683,
+        "pearson_correlation": 0.7474463182920194,
+        "cosine_similarity": 0.6178428968621107,
         "max_abs_normalized": {
-          "pearson_correlation": 0.5903698898268149,
-          "cosine_similarity": 0.5852297677740684
+          "pearson_correlation": 0.7474463182920194,
+          "cosine_similarity": 0.6178428968621107
         },
         "z_score_normalized": {
-          "pearson_correlation": 0.5903698898268149,
-          "cosine_similarity": 0.5903698898268149
+          "pearson_correlation": 0.7474463182920195,
+          "cosine_similarity": 0.7474463182920195
         },
         "cumulative_max_abs_normalized": {
-          "pearson_correlation": 0.6774351675081649,
-          "cosine_similarity": 0.8803730152834793
+          "pearson_correlation": 0.46452607982432387,
+          "cosine_similarity": 0.8704696440245168
         }
       },
       "Subtotal-Institutions": {
-        "days": 15,
-        "direction_match_rate": 0.4666666666666667,
+        "days": 12,
+        "direction_match_rate": 0.5833333333333334,
         "nonzero_direction_match_rate": 0.5833333333333334,
-        "pearson_correlation": -0.3313282382833734,
-        "cosine_similarity": -0.25326055779175144,
+        "pearson_correlation": -0.4357338408040929,
+        "cosine_similarity": -0.3474196844970657,
         "max_abs_normalized": {
-          "pearson_correlation": -0.3313282382833733,
-          "cosine_similarity": -0.2532605577917515
+          "pearson_correlation": -0.435733840804093,
+          "cosine_similarity": -0.34741968449706573
         },
         "z_score_normalized": {
-          "pearson_correlation": -0.3313282382833733,
-          "cosine_similarity": -0.3313282382833733
+          "pearson_correlation": -0.435733840804093,
+          "cosine_similarity": -0.435733840804093
         },
         "cumulative_max_abs_normalized": {
-          "pearson_correlation": -0.3564011664701964,
-          "cosine_similarity": -0.6873629331714273
+          "pearson_correlation": -0.007877340643183135,
+          "cosine_similarity": -0.7754490555951998
         }
       },
       "Total of foreign": {
-        "days": 15,
-        "direction_match_rate": 0.26666666666666666,
+        "days": 12,
+        "direction_match_rate": 0.3333333333333333,
         "nonzero_direction_match_rate": 0.3333333333333333,
-        "pearson_correlation": -0.2981533264084043,
-        "cosine_similarity": -0.24468956970049183,
+        "pearson_correlation": -0.7477488803632555,
+        "cosine_similarity": -0.3697542725227023,
         "max_abs_normalized": {
-          "pearson_correlation": -0.29815332640840425,
-          "cosine_similarity": -0.24468956970049188
+          "pearson_correlation": -0.7477488803632555,
+          "cosine_similarity": -0.3697542725227023
         },
         "z_score_normalized": {
-          "pearson_correlation": -0.29815332640840436,
-          "cosine_similarity": -0.2981533264084043
+          "pearson_correlation": -0.7477488803632555,
+          "cosine_similarity": -0.7477488803632555
         },
         "cumulative_max_abs_normalized": {
-          "pearson_correlation": 0.08860898217275023,
-          "cosine_similarity": -0.6634745899406187
+          "pearson_correlation": 0.2082552085760224,
+          "cosine_similarity": 0.23287272900074105
         }
       },
       "Other corporations": {
-        "days": 15,
-        "direction_match_rate": 0.26666666666666666,
+        "days": 12,
+        "direction_match_rate": 0.3333333333333333,
         "nonzero_direction_match_rate": 0.3333333333333333,
-        "pearson_correlation": -0.22437282502841968,
-        "cosine_similarity": -0.6008185178191087,
+        "pearson_correlation": -0.15652505006295442,
+        "cosine_similarity": -0.6215178105389889,
         "max_abs_normalized": {
-          "pearson_correlation": -0.22437282502841965,
-          "cosine_similarity": -0.6008185178191087
+          "pearson_correlation": -0.15652505006295442,
+          "cosine_similarity": -0.6215178105389888
         },
         "z_score_normalized": {
-          "pearson_correlation": -0.2243728250284197,
-          "cosine_similarity": -0.22437282502841968
+          "pearson_correlation": -0.15652505006295445,
+          "cosine_similarity": -0.15652505006295447
         },
         "cumulative_max_abs_normalized": {
-          "pearson_correlation": -0.9602509296258446,
-          "cosine_similarity": -0.9837634024174752
+          "pearson_correlation": -0.948960174627353,
+          "cosine_similarity": -0.9723478474274587
         }
       }
     }
   },
   "volume": {
     "metric": "volume",
-    "overlap_days": 15,
+    "overlap_days": 12,
     "llm_vs_individuals": {
-      "days": 15,
-      "direction_match_rate": 0.4666666666666667,
-      "nonzero_direction_match_rate": 0.4666666666666667,
-      "pearson_correlation": -0.47543989294658057,
-      "cosine_similarity": -0.5057413205447475,
+      "days": 12,
+      "direction_match_rate": 0.5833333333333334,
+      "nonzero_direction_match_rate": 0.5833333333333334,
+      "pearson_correlation": -0.73849051793227,
+      "cosine_similarity": -0.6024708210848924,
       "max_abs_normalized": {
-        "pearson_correlation": -0.4754398929465807,
-        "cosine_similarity": -0.5057413205447475
+        "pearson_correlation": -0.73849051793227,
+        "cosine_similarity": -0.6024708210848924
       },
       "z_score_normalized": {
-        "pearson_correlation": -0.4754398929465806,
-        "cosine_similarity": -0.4754398929465806
+        "pearson_correlation": -0.7384905179322699,
+        "cosine_similarity": -0.7384905179322699
       },
       "cumulative_max_abs_normalized": {
-        "pearson_correlation": -0.684410077833004,
-        "cosine_similarity": -0.9479281483658324
+        "pearson_correlation": -0.43584039034198196,
+        "cosine_similarity": -0.8620448700265202
       }
     },
     "counterside_vs_investor_groups": {
       "Individuals": {
-        "days": 15,
-        "direction_match_rate": 0.3333333333333333,
+        "days": 12,
+        "direction_match_rate": 0.4166666666666667,
         "nonzero_direction_match_rate": 0.4166666666666667,
-        "pearson_correlation": 0.5760688978839721,
-        "cosine_similarity": 0.5693011515130134,
+        "pearson_correlation": 0.73849051793227,
+        "cosine_similarity": 0.6024708210848924,
         "max_abs_normalized": {
-          "pearson_correlation": 0.5760688978839722,
-          "cosine_similarity": 0.5693011515130134
+          "pearson_correlation": 0.73849051793227,
+          "cosine_similarity": 0.6024708210848924
         },
         "z_score_normalized": {
-          "pearson_correlation": 0.5760688978839721,
-          "cosine_similarity": 0.5760688978839721
+          "pearson_correlation": 0.7384905179322699,
+          "cosine_similarity": 0.7384905179322699
         },
         "cumulative_max_abs_normalized": {
-          "pearson_correlation": 0.6587157895241494,
-          "cosine_similarity": 0.8750123346465757
+          "pearson_correlation": 0.43584039034198196,
+          "cosine_similarity": 0.8620448700265202
         }
       },
       "Subtotal-Institutions": {
-        "days": 15,
-        "direction_match_rate": 0.4666666666666667,
+        "days": 12,
+        "direction_match_rate": 0.5833333333333334,
         "nonzero_direction_match_rate": 0.5833333333333334,
-        "pearson_correlation": -0.32053799175864467,
-        "cosine_similarity": -0.239627230276495,
+        "pearson_correlation": -0.4239981969463599,
+        "cosine_similarity": -0.3337050076481876,
         "max_abs_normalized": {
-          "pearson_correlation": -0.3205379917586447,
-          "cosine_similarity": -0.23962723027649502
+          "pearson_correlation": -0.42399819694635993,
+          "cosine_similarity": -0.33370500764818767
         },
         "z_score_normalized": {
-          "pearson_correlation": -0.32053799175864467,
-          "cosine_similarity": -0.32053799175864467
+          "pearson_correlation": -0.4239981969463598,
+          "cosine_similarity": -0.4239981969463598
         },
         "cumulative_max_abs_normalized": {
-          "pearson_correlation": -0.3380456260988142,
-          "cosine_similarity": -0.6677019260197506
+          "pearson_correlation": 0.011641050175104983,
+          "cosine_similarity": -0.7691533732144812
         }
       },
       "Total of foreign": {
-        "days": 15,
-        "direction_match_rate": 0.26666666666666666,
+        "days": 12,
+        "direction_match_rate": 0.3333333333333333,
         "nonzero_direction_match_rate": 0.3333333333333333,
-        "pearson_correlation": -0.2887950426060506,
-        "cosine_similarity": -0.23478103320761998,
+        "pearson_correlation": -0.7469093752856337,
+        "cosine_similarity": -0.3580392996444627,
         "max_abs_normalized": {
-          "pearson_correlation": -0.2887950426060506,
-          "cosine_similarity": -0.23478103320762003
+          "pearson_correlation": -0.7469093752856338,
+          "cosine_similarity": -0.3580392996444626
         },
         "z_score_normalized": {
-          "pearson_correlation": -0.2887950426060506,
-          "cosine_similarity": -0.2887950426060506
+          "pearson_correlation": -0.7469093752856337,
+          "cosine_similarity": -0.7469093752856337
         },
         "cumulative_max_abs_normalized": {
-          "pearson_correlation": 0.11642068181879266,
-          "cosine_similarity": -0.6542660016372996
+          "pearson_correlation": 0.23562091972463234,
+          "cosine_similarity": 0.2873652418711992
         }
       },
       "Other corporations": {
-        "days": 15,
-        "direction_match_rate": 0.26666666666666666,
+        "days": 12,
+        "direction_match_rate": 0.3333333333333333,
         "nonzero_direction_match_rate": 0.3333333333333333,
-        "pearson_correlation": -0.19258605336985057,
-        "cosine_similarity": -0.5867812382711219,
+        "pearson_correlation": -0.12337561452319248,
+        "cosine_similarity": -0.6077658537357001,
         "max_abs_normalized": {
-          "pearson_correlation": -0.1925860533698506,
-          "cosine_similarity": -0.586781238271122
+          "pearson_correlation": -0.1233756145231925,
+          "cosine_similarity": -0.6077658537357002
         },
         "z_score_normalized": {
-          "pearson_correlation": -0.1925860533698506,
-          "cosine_similarity": -0.1925860533698506
+          "pearson_correlation": -0.12337561452319251,
+          "cosine_similarity": -0.12337561452319251
         },
         "cumulative_max_abs_normalized": {
-          "pearson_correlation": -0.9585556512742086,
-          "cosine_similarity": -0.983064339264954
+          "pearson_correlation": -0.9467996442496812,
+          "cosine_similarity": -0.9710498651888021
         }
       }
     }
