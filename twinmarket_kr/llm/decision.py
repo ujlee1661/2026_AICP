@@ -87,11 +87,17 @@ def parse_decision_json(content: str, constraints: dict[str, Any] | None = None)
         elif action == "sell":
             quantity = min(quantity, max_sell_quantity)
         if not allow_hold and quantity < min_order_unit:
-            if action != "buy" and max_buy_quantity >= min_order_unit:
+            if action == "buy" and max_buy_quantity >= min_order_unit:
+                quantity = min_order_unit
+                corrections.append("buy_quantity_too_small->min_order_unit")
+            elif action == "sell" and max_sell_quantity >= min_order_unit:
+                quantity = min_order_unit
+                corrections.append("sell_quantity_too_small->min_order_unit")
+            elif max_buy_quantity >= min_order_unit:
                 action = "buy"
                 quantity = min_order_unit
                 corrections.append("invalid_or_too_small->buy")
-            elif action != "sell" and max_sell_quantity >= min_order_unit:
+            elif max_sell_quantity >= min_order_unit:
                 action = "sell"
                 quantity = min_order_unit
                 corrections.append("invalid_or_too_small->sell")

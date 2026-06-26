@@ -8,6 +8,8 @@ import config
 from twinmarket_kr.agents.fundamental_agent import FundamentalAgent
 from twinmarket_kr.agents.memory_agent import MemoryAgent
 from twinmarket_kr.agents.news_agent import NewsAgent
+from twinmarket_kr.community.posting import posting_decision
+from twinmarket_kr.community.thinking import community_thinking
 from twinmarket_kr.core.collect_context import collect_context
 from twinmarket_kr.llm.analysis import analyze_market, depth2_post_search, depth2_pre_search, interpret_news
 from twinmarket_kr.llm.belief import update_belief
@@ -43,6 +45,7 @@ async def run_agent_turn(
     client: OpenRouterClient | None = None,
     event_logger: Any | None = None,
     db_write_lock: asyncio.Lock | None = None,
+    community_agent: Any | None = None,
 ) -> dict[str, Any] | None:
     today_context = collect_context(
         agent,
@@ -55,6 +58,7 @@ async def run_agent_turn(
         memory_agent=memory_agent,
         fundamental_agent=fundamental_agent,
         news_agent=news_agent,
+        community_agent=community_agent,
     )
     today_context["news_context"] = news_agent.expand_context_from_selection(
         base_context=today_context["news_context"],
@@ -102,12 +106,33 @@ async def run_agent_turn(
         today_context["news_context"]["search_results"] = search_results
         today_context["news_context"]["search_read_contents"] = search_results
         today_context["news_context"]["depth2_flow"] = depth2_flow
-    news_interpretation = await interpret_news(
-        agent,
-        today_context["news_context"],
-        client=client,
+    depth = int(agent.get("news_depth") if agent.get("news_depth") is not None else 1)
+    community_log = today_context.get("community_log")
+    should_do_community_thinking = (
+        config.ENABLE_COMMUNITY
+        and depth >= 1
+        and community_agent is not None
+        and community_log is not None
     )
+    if should_do_community_thinking:
+        news_interpretation, community_thinking_text = await asyncio.gather(
+            interpret_news(
+                agent,
+                today_context["news_context"],
+                client=client,
+            ),
+            community_thinking(agent, community_log, client=client),
+        )
+        community_agent.update_community_thinking(str(agent["agent_id"]), turn - 1, community_thinking_text)
+    else:
+        news_interpretation = await interpret_news(
+            agent,
+            today_context["news_context"],
+            client=client,
+        )
+        community_thinking_text = None
     today_context["news_interpretation"] = news_interpretation
+    today_context["community_thinking"] = community_thinking_text
     today_belief = await update_belief(
         agent,
         today_context,
@@ -144,6 +169,35 @@ async def run_agent_turn(
         allow_hold=decision_space != "buy_sell_only",
         client=client,
     )
+    if (
+        config.ENABLE_COMMUNITY
+        and config.ENABLE_COMMUNITY_POSTING
+        and depth >= 1
+        and community_agent is not None
+    ):
+        post_result = await posting_decision(
+            agent,
+            today_belief=today_belief,
+            decision=decision,
+            date=execution_date or date,
+            client=client,
+        )
+        if post_result is not None:
+            post_id = community_agent.save_post(
+                agent_id=str(agent["agent_id"]),
+                turn=turn,
+                date=execution_date or date,
+                post_type=post_result["post_type"],
+                title=post_result["title"],
+                content=post_result["content"],
+            )
+            if event_logger is not None:
+                event_logger.log_community_post(
+                    agent_id=str(agent["agent_id"]),
+                    turn=turn,
+                    date=execution_date or date,
+                    post={**post_result, "post_id": post_id},
+                )
     trade_log = {
         "agent_id": agent["agent_id"],
         "turn": turn,

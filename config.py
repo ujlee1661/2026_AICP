@@ -61,6 +61,22 @@ OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o")
 OPENROUTER_EMBED_MODEL = os.getenv("OPENROUTER_EMBED_MODEL", "")
 
 
+# ===== Community Settings =====
+ENABLE_COMMUNITY: bool = True
+ENABLE_COMMUNITY_POSTING: bool = True
+ENABLE_COMMUNITY_READING: bool = True
+
+COMMUNITY_DEPTH1_READ_LIMIT: int = 5
+COMMUNITY_DEPTH2_READ_LIMIT: int = 10
+COMMUNITY_BEST_POST_COUNT: int = 5
+
+BADGE_TOP_RETURN_PERCENTILE: int = 20
+BADGE_TOP_ASSET_PERCENTILE: int = 20
+BADGE_INFLUENCER_PERCENTILE: int = 20
+
+OPENROUTER_COMMUNITY_MODEL: str = os.getenv("OPENROUTER_COMMUNITY_MODEL", "openai/gpt-4o-mini")
+
+
 def ensure_directories() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

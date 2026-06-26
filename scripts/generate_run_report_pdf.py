@@ -48,13 +48,19 @@ def register_font() -> str:
 
 
 def load_csv(name: str) -> list[dict[str, str]]:
-    with (RUN_DIR / name).open(encoding="utf-8-sig", newline="") as f:
+    path = RUN_DIR / name
+    if not path.exists():
+        return []
+    with path.open(encoding="utf-8-sig", newline="") as f:
         return list(csv.DictReader(f))
 
 
 def load_jsonl(name: str) -> list[dict[str, Any]]:
+    path = RUN_DIR / name
+    if not path.exists():
+        return []
     rows = []
-    with (RUN_DIR / name).open(encoding="utf-8") as f:
+    with path.open(encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 rows.append(json.loads(line))
@@ -298,6 +304,11 @@ def main() -> None:
     daily_rows = load_csv("daily_exchange_summary.csv")
     order_rows = load_csv("submitted_orders.csv")
     fill_rows = load_csv("exchange_fills.csv")
+    community_posts = load_csv("community_posts.csv")
+    community_interactions = load_csv("community_interactions.csv")
+    community_best_posts = load_csv("community_best_posts.csv")
+    community_logs = load_csv("community_logs.csv")
+    community_selection_inputs = load_csv("community_selection_inputs.csv")
     turn_rows = load_jsonl("agent_turns.jsonl")
     portfolio_updates = load_jsonl("portfolio_updates.jsonl")
 
@@ -360,6 +371,42 @@ def main() -> None:
         ["완료 정보", f"{complete.get('run_id')} / {complete.get('date_count', meta['date_count'])}일 실행 완료"],
     ]
     story.append(table([[para(c, styles["KSmall"]) for c in row] for row in overview], [35 * mm, 135 * mm]))
+
+    if community_posts or community_interactions or community_logs:
+        story.append(para("1-1. Community 기능 체크리스트", styles["KHeading1"]))
+        depth_by_agent = {str(agent_id): int(depth) for agent_id, depth in (meta.get("agent_depths") or {}).items()}
+        depth0_ids = {agent_id for agent_id, depth in depth_by_agent.items() if depth == 0}
+        depth12_ids = {agent_id for agent_id, depth in depth_by_agent.items() if depth >= 1}
+        post_agents = {row.get("agent_id") for row in community_posts}
+        reading_agents = {row.get("agent_id") for row in community_interactions if row.get("post_id")}
+        thinking_agents = {
+            row["agent"]["agent_id"]
+            for row in turn_rows
+            if (row.get("context") or {}).get("community_thinking")
+        }
+        profile_rows = [row for row in community_interactions if row.get("author_profile") not in {"", "null", None}]
+        checks = [
+            ["항목", "상태", "근거"],
+            ["Depth 0 커뮤니티 미참여", "OK" if not (post_agents | reading_agents | thinking_agents) & depth0_ids else "확인 필요", f"Depth0={sorted(depth0_ids)}"],
+            ["Depth 1/2 포스팅", "OK" if post_agents <= depth12_ids else "확인 필요", f"post_agents={sorted(post_agents)}"],
+            ["게시글 후보 입력 로그", "OK" if community_selection_inputs else "누락", f"{len(community_selection_inputs)} rows"],
+            ["읽기/반응 로그", "OK" if community_interactions else "누락", f"{len(community_interactions)} rows"],
+            ["Depth 2 작성자 프로필", "OK" if profile_rows else "확인 필요", f"profile rows={len(profile_rows)}"],
+            ["Best 게시글 선정", "OK" if community_best_posts else "누락", f"{len(community_best_posts)} rows"],
+            ["다음날 Community Thinking", "OK" if thinking_agents else "확인 필요", f"thinking_agents={sorted(thinking_agents)}"],
+        ]
+        story.append(table([[para(c, styles["KSmall"]) for c in row] for row in checks], [45 * mm, 25 * mm, 100 * mm]))
+        reactions = Counter(row.get("reaction") for row in community_interactions if row.get("reaction"))
+        by_post_agent = Counter(row.get("agent_id") for row in community_posts)
+        by_read_agent = Counter(row.get("agent_id") for row in community_interactions if row.get("post_id"))
+        community_summary = [
+            ["항목", "내용"],
+            ["커뮤니티 규모", f"게시글 {len(community_posts)}건, 읽기/반응 {len(community_interactions)}건, Best {len(community_best_posts)}건, 로그 {len(community_logs)}건"],
+            ["반응 분포", ", ".join(f"{key}: {value}" for key, value in sorted(reactions.items())) or "-"],
+            ["Agent별 포스팅", ", ".join(f"{key}: {value}" for key, value in sorted(by_post_agent.items())) or "-"],
+            ["Agent별 읽기", ", ".join(f"{key}: {value}" for key, value in sorted(by_read_agent.items())) or "-"],
+        ]
+        story.append(table([[para(c, styles["KSmall"]) for c in row] for row in community_summary], [35 * mm, 135 * mm]))
 
     story.append(para("2. 일자별 전체 거래 현황", styles["KHeading1"]))
     daily_table = [["일자", "종가", "주문", "체결", "순방향", "판단 분포", "해석"]]

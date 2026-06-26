@@ -20,6 +20,7 @@ def collect_context(
     memory_agent: MemoryAgent,
     fundamental_agent: FundamentalAgent,
     news_agent: NewsAgent,
+    community_agent: Any | None = None,
 ) -> dict[str, Any]:
     market_date = market_features_date or date
     news_date = news_max_date or date
@@ -31,6 +32,10 @@ def collect_context(
     news_context = news_agent.build_base_context(news_date, news_depth)
     market_features = fundamental_agent.get_market_features(market_date, config.STOCK_CODE)
     market_features["as_of_date"] = market_date
+    community_log = None
+    if community_agent is not None and turn > 1:
+        if config.ENABLE_COMMUNITY and news_depth >= 1:
+            community_log = community_agent.get_community_log(str(agent["agent_id"]), turn - 1)
     return {
         "agent_id": agent["agent_id"],
         "turn": turn,
@@ -45,4 +50,5 @@ def collect_context(
         "portfolio_summary": portfolio_summary,
         "news_context": news_context,
         "market_features": market_features,
+        "community_log": community_log,
     }

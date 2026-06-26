@@ -1303,15 +1303,15 @@ asyncio.run(run_simulation(max_agents=3, max_days=2))
 
 | Step | 상태 | 완료 일시 | 메모 |
 |------|------|-----------|------|
-| 1. DB 스키마 | 미완료 | — | — |
-| 2. config.py | 미완료 | — | — |
-| 3. community/badge.py | 미완료 | — | — |
-| 4. community/agent.py | 미완료 | — | — |
-| 5. 프롬프트 3개 | 미완료 | — | — |
-| 6. community/thinking.py | 미완료 | — | — |
-| 7. community/posting.py | 미완료 | — | — |
-| 8. community/reading.py | 미완료 | — | — |
-| 9. collect_context.py | 미완료 | — | — |
-| 10. daily_cycle.py | 미완료 | — | — |
-| 11. simulation.py | 미완료 | — | — |
-| 12. update_belief.txt | 미완료 | — | — |
+| 1. DB 스키마 | 완료 | 2026-06-25 | community_posts / community_interactions / community_logs 추가, runtime reset 반영 |
+| 2. config.py | 완료 | 2026-06-25 | Community toggle/read limit/badge/model 설정 추가 |
+| 3. community/badge.py | 완료 | 2026-06-25 | 수익률/자산/누적 Like 기반 뱃지 계산 구현 |
+| 4. community/agent.py | 완료 | 2026-06-25 | 익명 코드, 게시글, 반응, Best, 로그, 작성자 프로필 DB helper 구현 |
+| 5. 프롬프트 3개 | 완료 | 2026-06-25 | community_thinking/posting_decision/community_reading 프롬프트 추가 |
+| 6. community/thinking.py | 완료 | 2026-06-25 | 전날 로그 기반 Community Thinking 구현 |
+| 7. community/posting.py | 완료 | 2026-06-25 | 거래 결정 직후 게시글 작성 여부/내용 JSON 결정 구현 |
+| 8. community/reading.py | 완료 | 2026-06-25 | 게시글 선택/본문 반응 2단계 LLM 구현 |
+| 9. collect_context.py | 완료 | 2026-06-25 | 전날 community_log 수집 연결 |
+| 10. daily_cycle.py | 완료 | 2026-06-25 | News Thinking과 Community Thinking 병렬화, posting 단계 추가 |
+| 11. simulation.py | 완료 | 2026-06-25 | CommunityAgent 초기화, 장후 community_phase 추가, Best/log 저장 구현 |
+| 12. update_belief.txt | 완료 | 2026-06-25 | community_thinking 반영 지시 추가 |

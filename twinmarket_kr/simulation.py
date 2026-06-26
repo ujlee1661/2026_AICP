@@ -11,8 +11,11 @@ from twinmarket_kr.agents.exchange_agent import ExchangeAgent
 from twinmarket_kr.agents.fundamental_agent import FundamentalAgent
 from twinmarket_kr.agents.memory_agent import MemoryAgent, load_agents_from_sys100
 from twinmarket_kr.agents.news_agent import NewsAgent
+from twinmarket_kr.community.agent import CommunityAgent
+from twinmarket_kr.community.badge import calculate_badges
+from twinmarket_kr.community.reading import community_reading_react, community_reading_select
 from twinmarket_kr.core.daily_cycle import run_agent_turn
-from twinmarket_kr.db.connection import connect
+from twinmarket_kr.db.connection import connect, init_sim_db
 from twinmarket_kr.llm.client import OpenRouterClient
 from twinmarket_kr.run_logger import SimulationLogger
 
@@ -108,6 +111,7 @@ async def run_simulation(
     fundamental = FundamentalAgent(config.SIM_DB)
     news = NewsAgent()
     exchange = ExchangeAgent(config.SIM_DB)
+    community = CommunityAgent(config.SIM_DB) if config.ENABLE_COMMUNITY else None
     client = OpenRouterClient()
     semaphore = asyncio.Semaphore(concurrency)
     db_write_lock = asyncio.Lock()
@@ -160,6 +164,7 @@ async def run_simulation(
                     client=client,
                     event_logger=logger,
                     db_write_lock=db_write_lock,
+                    community_agent=community,
                 )
             except Exception as exc:
                 if logger is not None:
@@ -206,6 +211,17 @@ async def run_simulation(
             current_prices={config.STOCK_CODE: real_price},
             logger=logger,
         )
+        if config.ENABLE_COMMUNITY and community is not None:
+            await community_phase(
+                agents=agents,
+                community_agent=community,
+                memory_agent=memory,
+                turn=index,
+                date=day,
+                client=client,
+                concurrency=concurrency,
+                event_logger=logger,
+            )
         print(f"{day} turn={index} orders={len(orders)} volume={results[config.STOCK_CODE]['volume']}")
     if logger is not None:
         logger.write_json(
@@ -339,10 +355,154 @@ def _update_portfolios_from_results(
             )
 
 
+async def community_phase(
+    *,
+    agents: list[dict[str, Any]],
+    community_agent: CommunityAgent,
+    memory_agent: MemoryAgent,
+    turn: int,
+    date: str,
+    client: OpenRouterClient,
+    concurrency: int = 8,
+    event_logger: SimulationLogger | None = None,
+) -> None:
+    if not config.ENABLE_COMMUNITY_READING:
+        best_posts = community_agent.mark_best_posts(date, config.COMMUNITY_BEST_POST_COUNT)
+        if event_logger is not None:
+            event_logger.log_community_best_posts(turn=turn, date=date, best_posts=best_posts)
+        for agent in agents:
+            if int(agent.get("news_depth") or 0) >= 1:
+                community_agent.save_community_log(
+                    agent_id=str(agent["agent_id"]),
+                    turn=turn,
+                    date=date,
+                    best_posts=best_posts,
+                    posts_read=[],
+                    thinking="",
+                )
+                if event_logger is not None:
+                    event_logger.log_community_log(
+                        agent_id=str(agent["agent_id"]),
+                        turn=turn,
+                        date=date,
+                        best_posts=best_posts,
+                        posts_read=[],
+                    )
+        return
+
+    badges = calculate_badges(agents, memory_agent, turn, str(config.SIM_DB))
+    active_agents = [agent for agent in agents if int(agent.get("news_depth") or 0) >= 1]
+    if not active_agents:
+        community_agent.mark_best_posts(date, config.COMMUNITY_BEST_POST_COUNT)
+        return
+
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+
+    async def _one_agent_reading(agent: dict[str, Any]) -> tuple[str, list[int], list[dict[str, Any]]]:
+        async with semaphore:
+            depth = int(agent.get("news_depth") or 0)
+            read_limit = (
+                config.COMMUNITY_DEPTH2_READ_LIMIT
+                if depth >= 2
+                else config.COMMUNITY_DEPTH1_READ_LIMIT
+            )
+            agent_id = str(agent["agent_id"])
+            post_list = community_agent.get_today_posts(date)
+            if not post_list:
+                return agent_id, [], []
+            visible_posts = [
+                {**post, "author_badges": badges.get(str(post["agent_id"]), [])}
+                for post in post_list
+                if str(post["agent_id"]) != agent_id
+            ]
+            if event_logger is not None:
+                event_logger.log_community_selection_input(
+                    agent_id=agent_id,
+                    turn=turn,
+                    date=date,
+                    depth=depth,
+                    read_limit=read_limit,
+                    visible_posts=visible_posts,
+                )
+            selected_ids = await community_reading_select(agent, visible_posts, read_limit, client=client)
+            if not selected_ids:
+                return agent_id, [], []
+
+            posts_content: list[dict[str, Any]] = []
+            for post_id in selected_ids:
+                content = community_agent.get_post_content(post_id)
+                if not content or str(content.get("agent_id")) == agent_id:
+                    continue
+                content["author_badges"] = badges.get(str(content.get("agent_id")), [])
+                content["author_profile"] = (
+                    community_agent.get_author_profile(str(content["agent_id"]), memory_agent, turn)
+                    if depth >= 2
+                    else None
+                )
+                posts_content.append(content)
+
+            reactions = await community_reading_react(agent, posts_content, client=client)
+            reaction_map = {int(item["post_id"]): item["reaction"] for item in reactions}
+            posts_read: list[dict[str, Any]] = []
+            for post in posts_content:
+                post_id = int(post["post_id"])
+                reaction = reaction_map.get(post_id, "read")
+                recorded = community_agent.record_reaction(agent_id, post_id, turn, date, reaction)
+                if recorded and reaction in {"like", "unlike"}:
+                    community_agent.update_post_score_live(post_id, reaction)
+                posts_read.append(
+                    {
+                        "post_id": post_id,
+                        "title": post.get("title", ""),
+                        "post_type": post.get("post_type", ""),
+                        "content": post.get("content", ""),
+                        "reaction": "read" if reaction == "none" else reaction,
+                        "author_badges": post.get("author_badges") or [],
+                        "author_profile": post.get("author_profile"),
+                    }
+                )
+            if event_logger is not None:
+                event_logger.log_community_reading(
+                    agent_id=agent_id,
+                    turn=turn,
+                    date=date,
+                    selected_post_ids=selected_ids,
+                    posts_read=posts_read,
+                )
+            return agent_id, selected_ids, posts_read
+
+    results = await asyncio.gather(*(_one_agent_reading(agent) for agent in active_agents))
+    best_posts = community_agent.mark_best_posts(date, config.COMMUNITY_BEST_POST_COUNT)
+    if event_logger is not None:
+        event_logger.log_community_best_posts(turn=turn, date=date, best_posts=best_posts)
+    for agent_id, _selected_ids, posts_read in results:
+        community_agent.save_community_log(
+            agent_id=agent_id,
+            turn=turn,
+            date=date,
+            best_posts=best_posts,
+            posts_read=posts_read,
+            thinking="",
+        )
+        if event_logger is not None:
+            event_logger.log_community_log(
+                agent_id=agent_id,
+                turn=turn,
+                date=date,
+                best_posts=best_posts,
+                posts_read=posts_read,
+            )
+    print(f"  community_phase done: {len(active_agents)} agents, {len(best_posts)} best posts")
+
+
 def _reset_runtime_tables(db_path: str) -> None:
+    init_sim_db(db_path)
     with connect(db_path) as conn:
         conn.execute("DELETE FROM TradingDetails")
         conn.execute("DELETE FROM trade_log")
         conn.execute("DELETE FROM belief_history WHERE turn > 0")
         conn.execute("DELETE FROM portfolio_state WHERE turn > 0")
+        conn.execute("DELETE FROM community_posts")
+        conn.execute("DELETE FROM community_interactions")
+        conn.execute("DELETE FROM community_logs WHERE turn > 0")
         conn.commit()

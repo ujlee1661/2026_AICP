@@ -34,13 +34,14 @@ class OpenRouterClient:
         self,
         messages: list[dict[str, str]],
         *,
+        model: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         temperature: float = 0.2,
     ) -> Any:
         kwargs: dict[str, Any] = {
-            "model": self.model,
+            "model": model or self.model,
             "messages": messages,
             "temperature": temperature,
         }

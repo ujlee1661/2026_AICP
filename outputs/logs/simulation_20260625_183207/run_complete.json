@@ -1,0 +1,8 @@
+{
+  "run_id": "simulation_20260625_183207",
+  "agent_count": 3,
+  "date_count": 2,
+  "information_mode": "same_day",
+  "decision_space": "buy_sell_only",
+  "log_dir": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/outputs/logs/simulation_20260625_183207"
+}

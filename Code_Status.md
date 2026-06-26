@@ -160,6 +160,24 @@
 - 영향: `twinmarket_kr/core/daily_cycle.py`, `twinmarket_kr/simulation.py`.
 - 되돌릴 때: `run_agent_turn()`에 넘기는 `db_write_lock`을 제거하면 이전 병렬 write 구조로 돌아간다.
 
+### [D-24] OpenRouterClient.chat의 호출별 model override 추가  (Community, 2026-06-25)
+- 무엇을: `OpenRouterClient.chat()`에 선택 인자 `model`을 추가해 커뮤니티 LLM 호출만 `OPENROUTER_COMMUNITY_MODEL`을 사용할 수 있게 했다.
+- 왜: Community 설계는 거래 결정 모델과 커뮤니티 모델을 분리하라고 명시하지만, 기존 클라이언트는 인스턴스 기본 모델만 사용했다.
+- 영향: `twinmarket_kr/llm/client.py`, `twinmarket_kr/community/thinking.py`, `posting.py`, `reading.py`.
+- 되돌릴 때: 커뮤니티용 별도 `OpenRouterClient(model=...)` 인스턴스를 만들고 `chat(model=...)` 호출을 제거한다.
+
+### [D-25] Community reading에서 자기 글은 열람 대상에서 제외  (Community, 2026-06-25)
+- 무엇을: 장후 `community_phase()`에서 Agent 본인이 작성한 게시글은 읽기 후보와 본문 제공 대상에서 제외했다.
+- 왜: 설계 문서가 "다른 Agent들의 글"을 읽고 반응한다고 설명하지만 SQL 스키마 차원에서는 자기 글 반응을 막지 않아 런타임에서 필터링했다.
+- 영향: `twinmarket_kr/simulation.py`의 `community_phase()`.
+- 되돌릴 때: `visible_posts`와 본문 수집부의 작성자 비교 조건을 제거한다.
+
+### [D-26] Community reading off 상태에서도 Best-only 로그 저장  (Community, 2026-06-25)
+- 무엇을: `ENABLE_COMMUNITY_READING=False`이고 포스팅은 켜져 있을 때, Depth 1/2 Agent에게 `posts_read=[]`와 Best 게시글만 담은 community_log를 저장한다.
+- 왜: 기능 단위 toggle에서 읽기/반응만 끄더라도 Best 게시글 기록은 다음날 컨텍스트 비교에 유용하며, 스키마상 별도 전역 Best 저장소가 없다.
+- 영향: `twinmarket_kr/simulation.py`의 `community_phase()`.
+- 되돌릴 때: reading off 분기에서 `save_community_log()` 호출을 제거한다.
+
 ### [D-22] validation 1차 지표를 sign/baseline 중심으로 재정렬  (Simulation Improvement, 2026-06-25)
 - 무엇을: validation summary와 PDF에 `direction_match_rate`, `balanced_accuracy`, `buy_recall`, `sell_recall`, confusion matrix, always-buy/sell, 50:50 random, actual-ratio random, previous-day individual direction, previous-day market return baseline을 추가했다. correlation 계열은 2차 지표로 유지한다.
 - 왜: buy/sell 방향 실험의 1차 질문은 실제 개인투자자 순매수/순매도 sign 예측이며, 단순 일치율은 buy/sell 분포 baseline과 같이 봐야 해석 가능하기 때문이다.

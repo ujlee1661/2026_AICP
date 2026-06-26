@@ -99,10 +99,70 @@ class SimulationLogger:
             "volume",
             "fill_count",
         ]
+        self._community_posts_csv_fields = [
+            "run_id",
+            "date",
+            "turn",
+            "agent_id",
+            "post_id",
+            "post_type",
+            "title",
+            "content",
+        ]
+        self._community_interactions_csv_fields = [
+            "run_id",
+            "date",
+            "turn",
+            "agent_id",
+            "selected_post_ids",
+            "post_id",
+            "title",
+            "post_type",
+            "reaction",
+            "author_badges",
+            "author_profile",
+        ]
+        self._community_selection_csv_fields = [
+            "run_id",
+            "date",
+            "turn",
+            "agent_id",
+            "depth",
+            "read_limit",
+            "visible_post_count",
+            "visible_post_ids",
+            "visible_posts_json",
+        ]
+        self._community_best_csv_fields = [
+            "run_id",
+            "date",
+            "turn",
+            "rank",
+            "post_id",
+            "title",
+            "post_type",
+            "score",
+        ]
+        self._community_logs_csv_fields = [
+            "run_id",
+            "date",
+            "turn",
+            "agent_id",
+            "best_posts_count",
+            "posts_read_count",
+            "community_thinking",
+            "best_posts_json",
+            "posts_read_json",
+        ]
         self._init_csv(self.run_dir / "agent_turns.csv", self._agent_csv_fields)
         self._init_csv(self.run_dir / "submitted_orders.csv", self._orders_csv_fields)
         self._init_csv(self.run_dir / "exchange_fills.csv", self._fills_csv_fields)
         self._init_csv(self.run_dir / "daily_exchange_summary.csv", self._daily_csv_fields)
+        self._init_csv(self.run_dir / "community_posts.csv", self._community_posts_csv_fields)
+        self._init_csv(self.run_dir / "community_selection_inputs.csv", self._community_selection_csv_fields)
+        self._init_csv(self.run_dir / "community_interactions.csv", self._community_interactions_csv_fields)
+        self._init_csv(self.run_dir / "community_best_posts.csv", self._community_best_csv_fields)
+        self._init_csv(self.run_dir / "community_logs.csv", self._community_logs_csv_fields)
         self.write_json("run_metadata.json", {"run_id": self.run_id, "created_at": timestamp, **(metadata or {})})
 
     def log_agent_turn(
@@ -263,6 +323,203 @@ class SimulationLogger:
                         "fee": tx.get("fee", 0.0),
                     },
                 )
+
+    def log_community_post(
+        self,
+        *,
+        agent_id: str,
+        turn: int,
+        date: str,
+        post: dict[str, Any],
+    ) -> None:
+        event = {
+            "run_id": self.run_id,
+            "event": "community_post",
+            "date": date,
+            "turn": turn,
+            "agent_id": agent_id,
+            "post": post,
+        }
+        self.write_jsonl("community_events.jsonl", event)
+        self.append_csv(
+            "community_posts.csv",
+            self._community_posts_csv_fields,
+            {
+                "run_id": self.run_id,
+                "date": date,
+                "turn": turn,
+                "agent_id": agent_id,
+                "post_id": post.get("post_id"),
+                "post_type": post.get("post_type"),
+                "title": post.get("title"),
+                "content": post.get("content"),
+            },
+        )
+
+    def log_community_reading(
+        self,
+        *,
+        agent_id: str,
+        turn: int,
+        date: str,
+        selected_post_ids: list[int],
+        posts_read: list[dict[str, Any]],
+    ) -> None:
+        event = {
+            "run_id": self.run_id,
+            "event": "community_reading",
+            "date": date,
+            "turn": turn,
+            "agent_id": agent_id,
+            "selected_post_ids": selected_post_ids,
+            "posts_read": posts_read,
+        }
+        self.write_jsonl("community_events.jsonl", event)
+        if not posts_read:
+            self.append_csv(
+                "community_interactions.csv",
+                self._community_interactions_csv_fields,
+                {
+                    "run_id": self.run_id,
+                    "date": date,
+                    "turn": turn,
+                    "agent_id": agent_id,
+                    "selected_post_ids": json.dumps(selected_post_ids, ensure_ascii=False),
+                },
+            )
+            return
+        for post in posts_read:
+            self.append_csv(
+                "community_interactions.csv",
+                self._community_interactions_csv_fields,
+                {
+                    "run_id": self.run_id,
+                    "date": date,
+                    "turn": turn,
+                    "agent_id": agent_id,
+                    "selected_post_ids": json.dumps(selected_post_ids, ensure_ascii=False),
+                    "post_id": post.get("post_id"),
+                    "title": post.get("title"),
+                    "post_type": post.get("post_type"),
+                    "reaction": post.get("reaction"),
+                    "author_badges": json.dumps(post.get("author_badges") or [], ensure_ascii=False),
+                    "author_profile": json.dumps(post.get("author_profile"), ensure_ascii=False, default=str),
+                },
+            )
+
+    def log_community_selection_input(
+        self,
+        *,
+        agent_id: str,
+        turn: int,
+        date: str,
+        depth: int,
+        read_limit: int,
+        visible_posts: list[dict[str, Any]],
+    ) -> None:
+        compact_posts = [
+            {
+                "post_id": post.get("post_id"),
+                "anonymous_code": post.get("anonymous_code"),
+                "post_type": post.get("post_type"),
+                "title": post.get("title"),
+                "like_count": post.get("like_count"),
+                "unlike_count": post.get("unlike_count"),
+                "score": post.get("score"),
+                "author_badges": post.get("author_badges") or [],
+            }
+            for post in visible_posts
+        ]
+        event = {
+            "run_id": self.run_id,
+            "event": "community_selection_input",
+            "date": date,
+            "turn": turn,
+            "agent_id": agent_id,
+            "depth": depth,
+            "read_limit": read_limit,
+            "visible_posts": compact_posts,
+        }
+        self.write_jsonl("community_selection_inputs.jsonl", event)
+        self.append_csv(
+            "community_selection_inputs.csv",
+            self._community_selection_csv_fields,
+            {
+                "run_id": self.run_id,
+                "date": date,
+                "turn": turn,
+                "agent_id": agent_id,
+                "depth": depth,
+                "read_limit": read_limit,
+                "visible_post_count": len(compact_posts),
+                "visible_post_ids": json.dumps([post.get("post_id") for post in compact_posts], ensure_ascii=False),
+                "visible_posts_json": json.dumps(compact_posts, ensure_ascii=False),
+            },
+        )
+
+    def log_community_best_posts(self, *, turn: int, date: str, best_posts: list[dict[str, Any]]) -> None:
+        self.write_jsonl(
+            "community_events.jsonl",
+            {
+                "run_id": self.run_id,
+                "event": "community_best_posts",
+                "date": date,
+                "turn": turn,
+                "best_posts": best_posts,
+            },
+        )
+        for rank, post in enumerate(best_posts, start=1):
+            self.append_csv(
+                "community_best_posts.csv",
+                self._community_best_csv_fields,
+                {
+                    "run_id": self.run_id,
+                    "date": date,
+                    "turn": turn,
+                    "rank": rank,
+                    "post_id": post.get("post_id"),
+                    "title": post.get("title"),
+                    "post_type": post.get("post_type"),
+                    "score": post.get("score"),
+                },
+            )
+
+    def log_community_log(
+        self,
+        *,
+        agent_id: str,
+        turn: int,
+        date: str,
+        best_posts: list[dict[str, Any]],
+        posts_read: list[dict[str, Any]],
+        community_thinking: str = "",
+    ) -> None:
+        event = {
+            "run_id": self.run_id,
+            "event": "community_log_saved",
+            "date": date,
+            "turn": turn,
+            "agent_id": agent_id,
+            "best_posts": best_posts,
+            "posts_read": posts_read,
+            "community_thinking": community_thinking,
+        }
+        self.write_jsonl("community_events.jsonl", event)
+        self.append_csv(
+            "community_logs.csv",
+            self._community_logs_csv_fields,
+            {
+                "run_id": self.run_id,
+                "date": date,
+                "turn": turn,
+                "agent_id": agent_id,
+                "best_posts_count": len(best_posts),
+                "posts_read_count": len(posts_read),
+                "community_thinking": community_thinking,
+                "best_posts_json": json.dumps(best_posts, ensure_ascii=False),
+                "posts_read_json": json.dumps(posts_read, ensure_ascii=False, default=str),
+            },
+        )
 
     def write_json(self, filename: str, data: dict[str, Any]) -> None:
         with self._lock:

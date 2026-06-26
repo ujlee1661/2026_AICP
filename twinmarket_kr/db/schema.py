@@ -105,6 +105,45 @@ SIM_DDLS = [
         volume INTEGER NOT NULL
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS community_posts (
+        post_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT NOT NULL,
+        anonymous_code TEXT NOT NULL,
+        turn INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        post_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        like_count INTEGER NOT NULL DEFAULT 0,
+        unlike_count INTEGER NOT NULL DEFAULT 0,
+        score INTEGER NOT NULL DEFAULT 0,
+        is_best INTEGER NOT NULL DEFAULT 0
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS community_interactions (
+        interaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT NOT NULL,
+        post_id INTEGER NOT NULL,
+        turn INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        reaction TEXT NOT NULL,
+        UNIQUE(agent_id, post_id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS community_logs (
+        log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT NOT NULL,
+        turn INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        best_posts_seen TEXT,
+        posts_read TEXT,
+        community_thinking TEXT,
+        UNIQUE(agent_id, turn)
+    );
+    """,
 ]
 
 
