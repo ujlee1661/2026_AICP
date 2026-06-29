@@ -17,6 +17,8 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from report_common import pick_representative_agents
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RUN_DIR = PROJECT_ROOT / "outputs" / "logs" / "current"
@@ -82,6 +84,16 @@ def table(data: list[list[Any]], widths: list[float] | None = None) -> Table:
     return t
 
 
+def latest_states(updates: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    states: dict[str, dict[str, Any]] = {}
+    for row in updates:
+        state = row.get("state") or {}
+        agent_id = str(state.get("agent_id") or "")
+        if agent_id:
+            states[agent_id] = state
+    return states
+
+
 def footer(canvas, doc) -> None:
     canvas.saveState()
     canvas.setFont("Korean", 8)
@@ -95,6 +107,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", type=Path, default=DEFAULT_RUN_DIR)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--representative-agents", type=int, default=4)
     args = parser.parse_args()
 
     run_dir = args.run_dir
@@ -116,6 +129,9 @@ def main() -> None:
     logs = read_csv(run_dir / "community_logs.csv")
     selection_inputs = read_jsonl(run_dir / "community_selection_inputs.jsonl")
     agent_turns = read_jsonl(run_dir / "agent_turns.jsonl")
+    portfolio_updates = read_jsonl(run_dir / "portfolio_updates.jsonl")
+    order_rows = read_csv(run_dir / "submitted_orders.csv")
+    fill_rows = read_csv(run_dir / "exchange_fills.csv")
 
     posts_by_date = defaultdict(list)
     for row in posts:
@@ -127,13 +143,35 @@ def main() -> None:
     for row in best_posts:
         best_by_date[row["date"]].append(row)
     selection_by_date = defaultdict(list)
+    post_meta: dict[str, dict[str, Any]] = {}
     for row in selection_inputs:
         selection_by_date[row["date"]].append(row)
+        for post in row.get("visible_posts") or []:
+            post_id = str(post.get("post_id") or "")
+            if post_id and post_id not in post_meta:
+                post_meta[post_id] = post
     thinking_by_date = defaultdict(list)
     for row in agent_turns:
         thinking = (row.get("context") or {}).get("community_thinking")
         if thinking:
             thinking_by_date[row["date"]].append((row["agent"]["agent_id"], thinking))
+
+    reaction_counts_by_post = defaultdict(Counter)
+    for row in interactions:
+        if row.get("post_id"):
+            reaction_counts_by_post[str(row["post_id"])][row.get("reaction") or "read"] += 1
+
+    final_states = latest_states(portfolio_updates)
+    representative_agents, representative_reasons = pick_representative_agents(
+        list(meta.get("agent_ids") or []),
+        final_states=final_states,
+        order_rows=order_rows,
+        fill_rows=fill_rows,
+        community_posts=posts,
+        community_interactions=interactions,
+        limit=args.representative_agents,
+    )
+    representative_agent_set = set(representative_agents)
 
     story: list[Any] = []
     story.append(para("TwinMarket Korea 커뮤니티 종토방 보고서", styles["KTitle"]))
@@ -147,6 +185,7 @@ def main() -> None:
         ["읽기/반응", f"{len(interactions)}건 ({', '.join(f'{k}: {v}' for k, v in sorted(reactions.items()))})"],
         ["Best 선정", f"{len(best_posts)}건"],
         ["Community Thinking", f"{sum(len(v) for v in thinking_by_date.values())}건"],
+        ["대표 에이전트", ", ".join(f"{agent_id} ({representative_reasons.get(agent_id, '')})" for agent_id in representative_agents)],
     ]
     story.append(table([[para(c, styles["KSmall"]) for c in row] for row in summary], [40 * mm, 130 * mm]))
 
@@ -157,31 +196,40 @@ def main() -> None:
         story.append(para(f"{date} 커뮤니티 화면", styles["KHeading1"]))
 
         story.append(para("게시글 목록", styles["KHeading2"]))
-        post_rows = [["post_id", "작성자", "유형", "제목", "반응", "본문 요약"]]
+        post_rows = [["post_id", "이름/작성자", "뱃지", "유형", "제목", "반응", "본문 요약"]]
         for row in posts_by_date.get(date, []):
+            meta_for_post = post_meta.get(str(row.get("post_id"))) or {}
+            badges = ", ".join(meta_for_post.get("author_badges") or []) or "뱃지 없음"
+            reactions_for_post = reaction_counts_by_post.get(str(row.get("post_id"))) or Counter()
+            reaction_text = ", ".join(f"{key} {value}" for key, value in sorted(reactions_for_post.items())) or "-"
             post_rows.append([
                 row.get("post_id"),
-                row.get("agent_id"),
+                f"{meta_for_post.get('anonymous_code') or '-'}\n{row.get('agent_id')}",
+                badges,
                 row.get("post_type"),
                 row.get("title"),
-                "",
+                reaction_text,
                 short(row.get("content"), 220),
             ])
-        story.append(table([[para(c, styles["KSmall"]) for c in row] for row in post_rows], [14 * mm, 17 * mm, 20 * mm, 45 * mm, 17 * mm, 57 * mm]))
+        story.append(table([[para(c, styles["KSmall"]) for c in row] for row in post_rows], [13 * mm, 23 * mm, 27 * mm, 18 * mm, 38 * mm, 20 * mm, 41 * mm]))
 
-        story.append(para("Agent별 선택 전 화면", styles["KHeading2"]))
-        selection_rows = [["Agent", "Depth", "읽기 한도", "후보 게시글"]]
+        story.append(para("대표 에이전트 선택 전 화면", styles["KHeading2"]))
+        selection_rows = [["Agent", "선정 기준", "Depth", "후보 게시글"]]
         for row in sorted(selection_by_date.get(date, []), key=lambda r: r.get("agent_id", "")):
+            if row.get("agent_id") not in representative_agent_set:
+                continue
             candidates = []
             for post in row.get("visible_posts") or []:
                 badges = ", ".join(post.get("author_badges") or []) or "뱃지 없음"
                 candidates.append(f"#{post.get('post_id')} [{post.get('post_type')}] {post.get('title')} / {post.get('anonymous_code')} / {badges} / score {post.get('score')}")
-            selection_rows.append([row.get("agent_id"), row.get("depth"), row.get("read_limit"), "\n".join(candidates)])
-        story.append(table([[para(c, styles["KSmall"]) for c in row] for row in selection_rows], [18 * mm, 15 * mm, 18 * mm, 119 * mm]))
+            selection_rows.append([row.get("agent_id"), representative_reasons.get(row.get("agent_id"), ""), row.get("depth"), "\n".join(candidates)])
+        story.append(table([[para(c, styles["KSmall"]) for c in row] for row in selection_rows], [18 * mm, 32 * mm, 14 * mm, 106 * mm]))
 
-        story.append(para("읽기 및 반응", styles["KHeading2"]))
+        story.append(para("대표 에이전트 읽기 및 반응", styles["KHeading2"]))
         read_rows = [["Agent", "선택", "읽은 글", "반응", "작성자 뱃지", "프로필 제공"]]
         for row in interactions_by_date.get(date, []):
+            if row.get("agent_id") not in representative_agent_set:
+                continue
             read_rows.append([
                 row.get("agent_id"),
                 row.get("selected_post_ids"),
@@ -199,11 +247,14 @@ def main() -> None:
         story.append(table([[para(c, styles["KSmall"]) for c in row] for row in best_rows], [14 * mm, 18 * mm, 95 * mm, 25 * mm, 18 * mm]))
 
         if thinking_by_date.get(date):
-            story.append(para("당일 Belief에 반영된 전날 Community Thinking", styles["KHeading2"]))
+            story.append(para("대표 에이전트 Community Thinking", styles["KHeading2"]))
             thinking_rows = [["Agent", "Community Thinking"]]
             for agent_id, thinking in thinking_by_date[date]:
+                if agent_id not in representative_agent_set:
+                    continue
                 thinking_rows.append([agent_id, short(thinking, 520)])
-            story.append(table([[para(c, styles["KSmall"]) for c in row] for row in thinking_rows], [22 * mm, 148 * mm]))
+            if len(thinking_rows) > 1:
+                story.append(table([[para(c, styles["KSmall"]) for c in row] for row in thinking_rows], [22 * mm, 148 * mm]))
 
     doc = SimpleDocTemplate(str(output), pagesize=A4, rightMargin=16 * mm, leftMargin=16 * mm, topMargin=16 * mm, bottomMargin=16 * mm, title="TwinMarket Community Report")
     doc.build(story, onFirstPage=footer, onLaterPages=footer)

@@ -27,6 +27,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from report_common import pick_representative_agents
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUN_DIR = PROJECT_ROOT / "outputs" / "logs" / "current"
@@ -231,6 +233,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", type=Path, default=RUN_DIR)
     parser.add_argument("--output", type=Path, default=REPORT_PATH)
+    parser.add_argument("--representative-agents", type=int, default=4)
     args = parser.parse_args()
 
     RUN_DIR = args.run_dir
@@ -338,6 +341,20 @@ def main() -> None:
     final_close = num(daily_rows[-1]["closing_price"])
     initial_values = load_initial_values(list(meta["agent_ids"]))
     final_states = latest_portfolios(portfolio_updates, final_close, initial_values)
+    representative_agents, representative_reasons = pick_representative_agents(
+        list(meta["agent_ids"]),
+        final_states=final_states,
+        order_rows=order_rows,
+        fill_rows=fill_rows,
+        community_posts=community_posts,
+        community_interactions=community_interactions,
+        limit=args.representative_agents,
+    )
+    representative_agent_set = set(representative_agents)
+    representative_orders_by_date = defaultdict(list)
+    for row in order_rows:
+        if row.get("agent_id") in representative_agent_set:
+            representative_orders_by_date[row["date"]].append(row)
 
     story: list[Any] = []
     story.append(para("TwinMarket Korea 시뮬레이션 실행 결과 보고서", styles["KTitle"]))
@@ -364,7 +381,11 @@ def main() -> None:
             f"seed={meta['random_seed']}, concurrency={meta['concurrency']}, balanced_depths={meta.get('balanced_depths', False)}, "
             f"information_mode={meta.get('information_mode', 'same_day')}, limit_only={meta.get('limit_only_orders', True)}",
         ],
-        ["선택 에이전트", ", ".join(meta["agent_ids"])],
+        ["전체 에이전트", ", ".join(meta["agent_ids"])],
+        [
+            "보고서 대표 에이전트",
+            ", ".join(f"{agent_id} ({representative_reasons.get(agent_id, '')})" for agent_id in representative_agents),
+        ],
         ["전체 판단", f"총 {len(agent_rows)}건: 매수 {action_counts.get('buy', 0)}건, 보유 {action_counts.get('hold', 0)}건, 매도 {action_counts.get('sell', 0)}건"],
         ["주문/체결", f"제출 주문 {len(order_rows)}건, 제출 수량 {total_order_qty:,}주, 체결 수량 {total_fill_qty:,}주, 수수료 합계 {total_fees:,.0f}원"],
         ["로그 위치", str(RUN_DIR)],
@@ -451,7 +472,7 @@ def main() -> None:
         )
     story.append(table([[para(c, styles["KSmall"]) for c in row] for row in daily_table], [20 * mm, 20 * mm, 25 * mm, 23 * mm, 22 * mm, 34 * mm, 34 * mm]))
 
-    story.append(para("3. 일자별 상세 분석", styles["KHeading1"]))
+    story.append(para("3. 일자별 대표 에이전트 상세 분석", styles["KHeading1"]))
     for day in daily_rows:
         date = day["date"]
         rows = by_date[date]
@@ -481,8 +502,8 @@ def main() -> None:
                 styles["KBody"],
             )
         )
-        story.append(para("당일 주문장", styles["KHeading2"]))
-        book_rows = order_book_rows(date, orders_by_date, fills_by_order)
+        story.append(para("대표 에이전트 주문장", styles["KHeading2"]))
+        book_rows = order_book_rows(date, representative_orders_by_date, fills_by_order)
         story.append(
             table(
                 [[para(c, styles["KSmall"]) for c in row] for row in book_rows],
@@ -496,8 +517,9 @@ def main() -> None:
                     news_titles.append(item.get("title"))
         story.append(para("주요 확인 뉴스: " + " / ".join(short(t, 70) for t in news_titles[:6]), styles["KBody"]))
 
-        detail_data = [["에이전트", "생각 변화", "시장/뉴스 해석", "판단 및 이유", "리스크 관리"]]
-        for turn in rows:
+        representative_rows = [turn for turn in rows if turn["agent"]["agent_id"] in representative_agent_set]
+        detail_data = [["에이전트", "선정 기준", "생각 변화", "시장/뉴스 해석", "판단 및 이유"]]
+        for turn in representative_rows:
             decision = turn["decision"]
             belief = turn["belief"]
             analysis = turn["market_analysis"]
@@ -513,18 +535,18 @@ def main() -> None:
             detail_data.append(
                 [
                     f"{turn['agent']['agent_id']}\n{turn['agent']['strategy']} / {turn['agent']['age']}세",
+                    representative_reasons.get(turn["agent"]["agent_id"], ""),
                     short(belief.get("belief_summary"), 260) + "\n변화: " + short(belief.get("view_change"), 180),
                     f"뉴스 감성: {interp.get('news_sentiment')} / {short(interp.get('persona_interpretation'), 210)}\n"
                     f"시장: {short(analysis.get('market_view'), 170)}",
                     decision_text,
-                    short(decision.get("risk_control"), 220),
                 ]
             )
-        story.append(table([[para(c, styles["KSmall"]) for c in row] for row in detail_data], [20 * mm, 40 * mm, 43 * mm, 43 * mm, 24 * mm]))
+        story.append(table([[para(c, styles["KSmall"]) for c in row] for row in detail_data], [20 * mm, 26 * mm, 43 * mm, 43 * mm, 38 * mm]))
 
     story.append(PageBreak())
-    story.append(para(f"4. 에이전트별 {meta['date_count']}거래일 사고 흐름 및 최종 상태", styles["KHeading1"]))
-    for agent_id in meta["agent_ids"]:
+    story.append(para(f"4. 대표 에이전트별 {meta['date_count']}거래일 사고 흐름 및 최종 상태", styles["KHeading1"]))
+    for agent_id in representative_agents:
         rows = by_agent[agent_id]
         profile = rows[0]["agent"]
         state = final_states.get(agent_id, {})
@@ -580,9 +602,9 @@ def main() -> None:
         story.append(table([[para(c, styles["KSmall"]) for c in row] for row in flow], [22 * mm, 55 * mm, 62 * mm, 31 * mm]))
 
     story.append(PageBreak())
-    story.append(para("5. 최종 포트폴리오 및 해석", styles["KHeading1"]))
+    story.append(para("5. 대표 에이전트 최종 포트폴리오 및 해석", styles["KHeading1"]))
     final_table = [["에이전트", "최종 보유", "현금", "평가 총자산", "평가 수익률", "요약 해석"]]
-    for agent_id in meta["agent_ids"]:
+    for agent_id in representative_agents:
         state = final_states.get(agent_id, {})
         positions = state.get("positions") or []
         pos_text = "-"
