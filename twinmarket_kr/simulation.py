@@ -13,6 +13,7 @@ from twinmarket_kr.agents.memory_agent import MemoryAgent, load_agents_from_sys1
 from twinmarket_kr.agents.news_agent import NewsAgent
 from twinmarket_kr.community.agent import CommunityAgent
 from twinmarket_kr.community.badge import calculate_badges
+from twinmarket_kr.community.posting import posting_decision
 from twinmarket_kr.community.reading import community_reading_react, community_reading_select
 from twinmarket_kr.core.daily_cycle import run_agent_turn
 from twinmarket_kr.db.connection import connect, init_sim_db
@@ -77,12 +78,12 @@ async def run_simulation(
     random_seed: int = config.RANDOM_SEED,
     start_date: str | None = None,
     end_date: str | None = None,
-    information_mode: str = "same_day",
+    information_mode: str = "pre_close_cutoff",
     decision_space: str = "buy_hold_sell",
     balanced_depths: bool = False,
 ) -> None:
-    if information_mode not in {"same_day", "prior_close"}:
-        raise ValueError("information_mode must be 'same_day' or 'prior_close'")
+    if information_mode not in {"pre_close_cutoff", "same_day", "prior_close"}:
+        raise ValueError("information_mode must be 'pre_close_cutoff', 'same_day', or 'prior_close'")
     if decision_space not in {"buy_hold_sell", "buy_sell_only"}:
         raise ValueError("decision_space must be 'buy_hold_sell' or 'buy_sell_only'")
     agents = load_agents_from_sys100(config.SYS_100_DB)
@@ -97,9 +98,10 @@ async def run_simulation(
             agents = agents[:max_agents]
         agents = _ensure_depth2_agent(agents, all_agents)
     previous_by_date = _previous_date_map()
-    date_limit = None if max_days is None else max_days + (1 if information_mode == "prior_close" else 0)
+    uses_previous_market = information_mode in {"pre_close_cutoff", "prior_close"}
+    date_limit = None if max_days is None else max_days + (1 if uses_previous_market else 0)
     dates = trading_dates_between(start_date=start_date, end_date=end_date, limit=date_limit)
-    if information_mode == "prior_close":
+    if uses_previous_market:
         dates = [day for day in dates if day in previous_by_date]
         if max_days:
             dates = dates[:max_days]
@@ -146,6 +148,9 @@ async def run_simulation(
         day: str,
         market_features_date: str,
         news_max_date: str,
+        news_start_date: str | None,
+        news_start_time: str | None,
+        news_end_time: str | None,
     ) -> dict[str, Any] | None:
         async with semaphore:
             try:
@@ -155,6 +160,9 @@ async def run_simulation(
                     date=day,
                     market_features_date=market_features_date,
                     news_max_date=news_max_date,
+                    news_start_date=news_start_date,
+                    news_start_time=news_start_time,
+                    news_end_time=news_end_time,
                     execution_date=day,
                     information_mode=information_mode,
                     decision_space=decision_space,
@@ -172,19 +180,41 @@ async def run_simulation(
                 raise
 
     for index, day in enumerate(dates, start=1):
-        if information_mode == "prior_close":
+        news_start_date = None
+        news_start_time = None
+        news_end_time = None
+        if information_mode == "pre_close_cutoff":
+            market_features_date = previous_by_date[day]
+            news_start_date = previous_by_date[day]
+            news_start_time = config.MARKET_CLOSE_TIME
+            news_max_date = day
+            news_end_time = config.ORDER_CUTOFF_TIME
+        elif information_mode == "prior_close":
             market_features_date = previous_by_date[day]
             news_max_date = previous_by_date[day]
         else:
             market_features_date = day
             news_max_date = day
-        orders = [
-            order
-            for order in await asyncio.gather(
-                *(guarded_turn(agent, index, day, market_features_date, news_max_date) for agent in agents)
+        turn_results = [
+            result
+            for result in await asyncio.gather(
+                *(
+                    guarded_turn(
+                        agent,
+                        index,
+                        day,
+                        market_features_date,
+                        news_max_date,
+                        news_start_date,
+                        news_start_time,
+                        news_end_time,
+                    )
+                    for agent in agents
+                )
             )
-            if order is not None
+            if result is not None
         ]
+        orders = [result["order"] for result in turn_results if result.get("order") is not None]
         real_price = fundamental.get_market_features(day)["close"]
         previous_execution_date = previous_by_date.get(day)
         last_price = (
@@ -201,7 +231,7 @@ async def run_simulation(
         )
         if logger is not None:
             logger.log_daily_exchange(date=day, turn=index, orders=orders, results=results)
-        _update_portfolios_from_results(
+        execution_by_agent = _update_portfolios_from_results(
             memory=memory,
             agents=agents,
             turn=index,
@@ -211,6 +241,17 @@ async def run_simulation(
             current_prices={config.STOCK_CODE: real_price},
             logger=logger,
         )
+        if config.ENABLE_COMMUNITY and config.ENABLE_COMMUNITY_POSTING and community is not None:
+            await post_trade_posting_phase(
+                turn_results=turn_results,
+                community_agent=community,
+                execution_by_agent=execution_by_agent,
+                turn=index,
+                date=day,
+                client=client,
+                concurrency=concurrency,
+                event_logger=logger,
+            )
         if config.ENABLE_COMMUNITY and community is not None:
             await community_phase(
                 agents=agents,
@@ -297,7 +338,7 @@ def _update_portfolios_from_results(
     results: dict[str, dict[str, Any]],
     current_prices: dict[str, float],
     logger: SimulationLogger | None,
-) -> None:
+) -> dict[str, dict[str, Any]]:
     fills_by_agent: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for stock_code, result in results.items():
         for tx in result.get("transactions") or []:
@@ -330,9 +371,19 @@ def _update_portfolios_from_results(
             executed_price=executed_price,
             fee=total_fee,
         )
+    execution_by_agent: dict[str, dict[str, Any]] = {}
     for agent in agents:
         agent_id = str(agent["agent_id"])
         fills = fills_by_agent.get(agent_id, [])
+        filled_quantity = sum(int(fill["quantity"]) for fill in fills)
+        total_value = sum(float(fill["quantity"]) * float(fill["price"]) for fill in fills)
+        total_fee = sum(float(fill.get("fee", 0)) for fill in fills)
+        execution_by_agent[agent_id] = {
+            "fills": fills,
+            "filled_quantity": filled_quantity,
+            "executed_price": total_value / filled_quantity if filled_quantity else None,
+            "fee": total_fee,
+        }
         state = memory.update_portfolio(
             agent_id,
             turn,
@@ -353,6 +404,61 @@ def _update_portfolios_from_results(
                     "state": state,
                 },
             )
+    return execution_by_agent
+
+
+async def post_trade_posting_phase(
+    *,
+    turn_results: list[dict[str, Any]],
+    community_agent: CommunityAgent,
+    execution_by_agent: dict[str, dict[str, Any]],
+    turn: int,
+    date: str,
+    client: OpenRouterClient,
+    concurrency: int = 8,
+    event_logger: SimulationLogger | None = None,
+) -> None:
+    active_results = [
+        result
+        for result in turn_results
+        if int(result.get("agent", {}).get("news_depth") or 0) >= 1
+    ]
+    if not active_results:
+        return
+
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+
+    async def _one_post(result: dict[str, Any]) -> None:
+        async with semaphore:
+            agent = result["agent"]
+            agent_id = str(agent["agent_id"])
+            post_result = await posting_decision(
+                agent,
+                today_belief=result["belief"],
+                decision=result["decision"],
+                date=date,
+                execution_summary=execution_by_agent.get(agent_id, {}),
+                client=client,
+            )
+            if post_result is None:
+                return
+            post_id = community_agent.save_post(
+                agent_id=agent_id,
+                turn=turn,
+                date=date,
+                post_type=post_result["post_type"],
+                title=post_result["title"],
+                content=post_result["content"],
+            )
+            if event_logger is not None:
+                event_logger.log_community_post(
+                    agent_id=agent_id,
+                    turn=turn,
+                    date=date,
+                    post={**post_result, "post_id": post_id},
+                )
+
+    await asyncio.gather(*(_one_post(result) for result in active_results))
 
 
 async def community_phase(

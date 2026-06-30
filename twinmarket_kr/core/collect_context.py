@@ -15,8 +15,11 @@ def collect_context(
     date: str,
     market_features_date: str | None = None,
     news_max_date: str | None = None,
+    news_start_date: str | None = None,
+    news_start_time: str | None = None,
+    news_end_time: str | None = None,
     execution_date: str | None = None,
-    information_mode: str = "same_day",
+    information_mode: str = "pre_close_cutoff",
     memory_agent: MemoryAgent,
     fundamental_agent: FundamentalAgent,
     news_agent: NewsAgent,
@@ -29,7 +32,16 @@ def collect_context(
     portfolio_summary = memory_agent.get_portfolio_summary(agent["agent_id"], turn - 1)
     action_reason = memory_agent.get_last_action_reason(agent["agent_id"])
     news_depth = 1 if agent.get("news_depth") is None else int(agent["news_depth"])
-    news_context = news_agent.build_base_context(news_date, news_depth)
+    if news_start_date and news_start_time and news_end_time:
+        news_context = news_agent.build_window_context(
+            start_date=news_start_date,
+            start_time=news_start_time,
+            end_date=news_date,
+            end_time=news_end_time,
+            news_depth=news_depth,
+        )
+    else:
+        news_context = news_agent.build_base_context(news_date, news_depth)
     market_features = fundamental_agent.get_market_features(market_date, config.STOCK_CODE)
     market_features["as_of_date"] = market_date
     community_log = None
@@ -42,7 +54,10 @@ def collect_context(
         "date": date,
         "decision_date": date,
         "market_features_date": market_date,
+        "news_start_date": news_start_date,
+        "news_start_time": news_start_time,
         "news_max_date": news_date,
+        "news_end_time": news_end_time,
         "execution_date": exec_date,
         "information_mode": information_mode,
         "previous_belief": previous_belief,

@@ -379,7 +379,7 @@ def main() -> None:
             f"에이전트 {meta['agent_count']}명, {meta['date_count']}거래일, "
             f"기간={meta.get('start_date') or daily_rows[0]['date']}~{meta.get('end_date') or daily_rows[-1]['date']}, "
             f"seed={meta['random_seed']}, concurrency={meta['concurrency']}, balanced_depths={meta.get('balanced_depths', False)}, "
-            f"information_mode={meta.get('information_mode', 'same_day')}, limit_only={meta.get('limit_only_orders', True)}",
+            f"information_mode={meta.get('information_mode', 'pre_close_cutoff')}, limit_only={meta.get('limit_only_orders', True)}",
         ],
         ["전체 에이전트", ", ".join(meta["agent_ids"])],
         [
@@ -493,7 +493,9 @@ def main() -> None:
             para(
                 f"정보 기준: decision_date={context_meta.get('decision_date', date)}, "
                 f"market_features_date={context_meta.get('market_features_date', date)}, "
+                f"news_start={context_meta.get('news_start_date') or ''} {context_meta.get('news_start_time') or ''}, "
                 f"news_max_date={context_meta.get('news_max_date', date)}, "
+                f"news_end_time={context_meta.get('news_end_time') or ''}, "
                 f"execution_date={context_meta.get('execution_date', date)}. "
                 f"시장 지표: 기준 종가 {money(market.get('close'))}, 실행 종가 {money(day['closing_price'])}, 등락률 {pct(market.get('pct_chg'))}, "
                 f"MA5 {money(market.get('ma5'))}, MA20 {money(market.get('ma20'))}. "

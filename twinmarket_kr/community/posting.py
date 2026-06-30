@@ -26,13 +26,19 @@ async def posting_decision(
     today_belief: dict[str, Any],
     decision: dict[str, Any],
     date: str,
+    execution_summary: dict[str, Any] | None = None,
     client: OpenRouterClient | None = None,
 ) -> dict[str, Any] | None:
     client = client or OpenRouterClient()
     prompt_template = load_prompt("posting_decision.txt")
+    execution_summary = execution_summary or {}
     trade_summary = (
-        f"오늘 거래: {decision.get('action', 'hold')} {decision.get('quantity', 0)}주, "
-        f"주문가: {decision.get('price', '')}, 이유: {str(decision.get('reason', ''))[:200]}"
+        f"오늘 주문: {decision.get('action', 'hold')} {decision.get('quantity', 0)}주, "
+        f"주문가: {decision.get('price', '')}, "
+        f"체결수량: {execution_summary.get('filled_quantity', 0)}주, "
+        f"체결평균가: {execution_summary.get('executed_price') or '미체결'}, "
+        f"수수료: {execution_summary.get('fee', 0)}, "
+        f"이유: {str(decision.get('reason', ''))[:200]}"
     )
     prompt = prompt_template.format(
         persona_prompt=agent.get("persona_prompt", ""),

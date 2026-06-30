@@ -5,7 +5,7 @@ import pickle
 import random
 import re
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +46,37 @@ def _select_daily(rows: list[dict[str, Any]], *, seed: int | None = None) -> lis
 def _parse_date(value: str) -> date:
     text = str(value).strip()[:10]
     return datetime.strptime(text, "%Y-%m-%d").date()
+
+
+def _parse_time(value: str) -> time | None:
+    text = str(value or "").strip()
+    match = re.search(r"\d{2}:\d{2}", text)
+    if not match:
+        return None
+    return datetime.strptime(match.group(0), "%H:%M").time()
+
+
+def _combine_datetime(day: str, time_text: str) -> datetime | None:
+    parsed_time = _parse_time(time_text)
+    if parsed_time is None:
+        return None
+    return datetime.combine(_parse_date(day), parsed_time)
+
+
+def _in_datetime_window(
+    row: dict[str, Any],
+    *,
+    start_date: str,
+    start_time: str,
+    end_date: str,
+    end_time: str,
+) -> bool:
+    row_dt = _combine_datetime(str(row.get("date", "")), str(row.get("time", "")))
+    start_dt = _combine_datetime(start_date, start_time)
+    end_dt = _combine_datetime(end_date, end_time)
+    if row_dt is None or start_dt is None or end_dt is None:
+        return False
+    return start_dt < row_dt <= end_dt
 
 
 def _normalize_category(raw: str | None, title: str, summary: str) -> str:
@@ -216,6 +247,32 @@ class NewsAgent:
             if row.get("date") == target_date
         ]
 
+    def get_window_titles(
+        self,
+        *,
+        start_date: str,
+        start_time: str,
+        end_date: str,
+        end_time: str,
+    ) -> list[dict[str, str]]:
+        return [
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "date": row["date"],
+                "time": row.get("time", ""),
+                "type": row.get("category", ""),
+            }
+            for row in self._daily
+            if _in_datetime_window(
+                row,
+                start_date=start_date,
+                start_time=start_time,
+                end_date=end_date,
+                end_time=end_time,
+            )
+        ]
+
     def read_news(
         self,
         *,
@@ -291,17 +348,34 @@ class NewsAgent:
         *,
         keywords: list[str],
         current_date: str,
+        window_start_date: str | None = None,
+        window_start_time: str | None = None,
+        window_end_date: str | None = None,
+        window_end_time: str | None = None,
         lookback_days: int = 7,
         top_n: int = 10,
     ) -> list[dict[str, Any]]:
         normalized_keywords = [str(keyword).strip() for keyword in keywords if str(keyword).strip()]
         if not normalized_keywords:
             return []
-        end = _parse_date(current_date)
-        start = end - timedelta(days=lookback_days - 1)
-        candidates = [
-            row for row in self._processed if start <= _parse_date(row["date"]) <= end
-        ]
+        if window_start_date and window_start_time and window_end_date and window_end_time:
+            candidates = [
+                row
+                for row in self._processed
+                if _in_datetime_window(
+                    row,
+                    start_date=window_start_date,
+                    start_time=window_start_time,
+                    end_date=window_end_date,
+                    end_time=window_end_time,
+                )
+            ]
+        else:
+            end = _parse_date(current_date)
+            start = end - timedelta(days=lookback_days - 1)
+            candidates = [
+                row for row in self._processed if start <= _parse_date(row["date"]) <= end
+            ]
         scored: list[tuple[float, dict[str, str]]] = []
         for row in candidates:
             haystack = f"{row['title']} {row.get('summary', '')}"
@@ -330,9 +404,10 @@ class NewsAgent:
         ]
 
     def build_base_context(self, target_date: str, news_depth: int = 1) -> dict[str, Any]:
+        daily_titles = self.get_daily_titles(target_date)
         return {
             "news_depth": news_depth,
-            "daily_titles": self.get_daily_titles(target_date),
+            "daily_titles": daily_titles,
             "read_contents": [],
             "search_results": {},
             "search_read_contents": [],
@@ -341,6 +416,41 @@ class NewsAgent:
                 "search_fields_max": 0,
                 "search_read_max": 10 if news_depth >= 2 else 0,
                 "lookback_days": 7 if news_depth >= 2 else 0,
+            },
+        }
+
+    def build_window_context(
+        self,
+        *,
+        start_date: str,
+        start_time: str,
+        end_date: str,
+        end_time: str,
+        news_depth: int = 1,
+    ) -> dict[str, Any]:
+        daily_titles = self.get_window_titles(
+            start_date=start_date,
+            start_time=start_time,
+            end_date=end_date,
+            end_time=end_time,
+        )
+        return {
+            "news_depth": news_depth,
+            "daily_titles": daily_titles,
+            "read_contents": [],
+            "search_results": {},
+            "search_read_contents": [],
+            "window": {
+                "start_date": start_date,
+                "start_time": start_time,
+                "end_date": end_date,
+                "end_time": end_time,
+            },
+            "limits": {
+                "daily_read_max": 0 if news_depth <= 0 else 10,
+                "search_fields_max": 0,
+                "search_read_max": 10 if news_depth >= 2 else 0,
+                "lookback_days": 0,
             },
         }
 

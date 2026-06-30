@@ -1,0 +1,3 @@
+﻿run_id,date,turn,agent_id,decision_date,market_features_date,news_start_date,news_start_time,news_max_date,news_end_time,execution_date,information_mode,stock_code,direction,quantity,price,order_type,reason
+simulation_20260630_171955,2026-04-24,1,A090,2026-04-24,2026-04-23,2026-04-23,15:30,2026-04-24,15:30,2026-04-24,pre_close_cutoff,005930,buy,1,224500.0,limit,fake decision
+simulation_20260630_171955,2026-04-24,1,A098,2026-04-24,2026-04-23,2026-04-23,15:30,2026-04-24,15:30,2026-04-24,pre_close_cutoff,005930,buy,1,224500.0,limit,fake decision

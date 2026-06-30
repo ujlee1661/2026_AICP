@@ -23,8 +23,8 @@ def main() -> None:
     parser.add_argument("--end-date", default=None)
     parser.add_argument(
         "--information-mode",
-        choices=("same_day", "prior_close"),
-        default="same_day",
+        choices=("pre_close_cutoff", "same_day", "prior_close"),
+        default="pre_close_cutoff",
         help="Information cutoff for each decision turn.",
     )
     parser.add_argument(

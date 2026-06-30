@@ -8,7 +8,6 @@ import config
 from twinmarket_kr.agents.fundamental_agent import FundamentalAgent
 from twinmarket_kr.agents.memory_agent import MemoryAgent
 from twinmarket_kr.agents.news_agent import NewsAgent
-from twinmarket_kr.community.posting import posting_decision
 from twinmarket_kr.community.thinking import community_thinking
 from twinmarket_kr.core.collect_context import collect_context
 from twinmarket_kr.llm.analysis import analyze_market, depth2_post_search, depth2_pre_search, interpret_news
@@ -36,8 +35,11 @@ async def run_agent_turn(
     date: str,
     market_features_date: str | None = None,
     news_max_date: str | None = None,
+    news_start_date: str | None = None,
+    news_start_time: str | None = None,
+    news_end_time: str | None = None,
     execution_date: str | None = None,
-    information_mode: str = "same_day",
+    information_mode: str = "pre_close_cutoff",
     decision_space: str = "buy_hold_sell",
     memory_agent: MemoryAgent,
     fundamental_agent: FundamentalAgent,
@@ -46,13 +48,16 @@ async def run_agent_turn(
     event_logger: Any | None = None,
     db_write_lock: asyncio.Lock | None = None,
     community_agent: Any | None = None,
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     today_context = collect_context(
         agent,
         turn=turn,
         date=date,
         market_features_date=market_features_date,
         news_max_date=news_max_date,
+        news_start_date=news_start_date,
+        news_start_time=news_start_time,
+        news_end_time=news_end_time,
         execution_date=execution_date,
         information_mode=information_mode,
         memory_agent=memory_agent,
@@ -82,6 +87,10 @@ async def run_agent_turn(
             search_results = news_agent.search_news_flat(
                 keywords=list(pre_search.get("search_keywords") or []),
                 current_date=today_context["news_max_date"],
+                window_start_date=today_context.get("news_start_date"),
+                window_start_time=today_context.get("news_start_time"),
+                window_end_date=today_context.get("news_max_date"),
+                window_end_time=today_context.get("news_end_time"),
                 top_n=10,
             )
             post_search = await depth2_post_search(
@@ -169,35 +178,6 @@ async def run_agent_turn(
         allow_hold=decision_space != "buy_sell_only",
         client=client,
     )
-    if (
-        config.ENABLE_COMMUNITY
-        and config.ENABLE_COMMUNITY_POSTING
-        and depth >= 1
-        and community_agent is not None
-    ):
-        post_result = await posting_decision(
-            agent,
-            today_belief=today_belief,
-            decision=decision,
-            date=execution_date or date,
-            client=client,
-        )
-        if post_result is not None:
-            post_id = community_agent.save_post(
-                agent_id=str(agent["agent_id"]),
-                turn=turn,
-                date=execution_date or date,
-                post_type=post_result["post_type"],
-                title=post_result["title"],
-                content=post_result["content"],
-            )
-            if event_logger is not None:
-                event_logger.log_community_post(
-                    agent_id=str(agent["agent_id"]),
-                    turn=turn,
-                    date=execution_date or date,
-                    post={**post_result, "post_id": post_id},
-                )
     trade_log = {
         "agent_id": agent["agent_id"],
         "turn": turn,
@@ -230,7 +210,10 @@ async def run_agent_turn(
             "reason": decision["reason"],
             "decision_date": today_context["decision_date"],
             "market_features_date": today_context["market_features_date"],
+            "news_start_date": today_context["news_start_date"],
+            "news_start_time": today_context["news_start_time"],
             "news_max_date": today_context["news_max_date"],
+            "news_end_time": today_context["news_end_time"],
             "execution_date": today_context["execution_date"],
             "information_mode": today_context["information_mode"],
         }
@@ -247,4 +230,12 @@ async def run_agent_turn(
             order=order,
             depth2_flow=depth2_flow,
         )
-    return order
+    return {
+        "agent": agent,
+        "context": today_context,
+        "belief": today_belief,
+        "decision": decision,
+        "order": order,
+        "news_interpretation": news_interpretation,
+        "market_analysis": market_analysis,
+    }

@@ -118,7 +118,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=config.RANDOM_SEED)
     parser.add_argument("--start-date", default=None)
     parser.add_argument("--end-date", default=None)
-    parser.add_argument("--information-mode", choices=("same_day", "prior_close"), default="same_day")
+    parser.add_argument(
+        "--information-mode",
+        choices=("pre_close_cutoff", "same_day", "prior_close"),
+        default="pre_close_cutoff",
+    )
     parser.add_argument("--decision-space", choices=("buy_hold_sell", "buy_sell_only"), default="buy_sell_only")
     parser.add_argument("--random-agents", action="store_true")
     parser.add_argument("--balanced-depths", action="store_true", default=True)
