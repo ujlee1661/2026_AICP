@@ -79,13 +79,13 @@ async def run_simulation(
     start_date: str | None = None,
     end_date: str | None = None,
     information_mode: str = "pre_close_cutoff",
-    decision_space: str = "buy_hold_sell",
+    decision_space: str = "buy_sell_only",
     balanced_depths: bool = False,
 ) -> None:
     if information_mode not in {"pre_close_cutoff", "same_day", "prior_close"}:
         raise ValueError("information_mode must be 'pre_close_cutoff', 'same_day', or 'prior_close'")
-    if decision_space not in {"buy_hold_sell", "buy_sell_only"}:
-        raise ValueError("decision_space must be 'buy_hold_sell' or 'buy_sell_only'")
+    if decision_space != "buy_sell_only":
+        raise ValueError("decision_space must be 'buy_sell_only'")
     agents = load_agents_from_sys100(config.SYS_100_DB)
     if max_agents:
         all_agents = agents

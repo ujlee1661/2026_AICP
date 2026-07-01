@@ -40,7 +40,7 @@ async def run_agent_turn(
     news_end_time: str | None = None,
     execution_date: str | None = None,
     information_mode: str = "pre_close_cutoff",
-    decision_space: str = "buy_hold_sell",
+    decision_space: str = "buy_sell_only",
     memory_agent: MemoryAgent,
     fundamental_agent: FundamentalAgent,
     news_agent: NewsAgent,

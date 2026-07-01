@@ -18,7 +18,7 @@ def build_trading_constraints(
     current_price: float,
     min_order_unit: int = config.MIN_ORDER_UNIT,
     max_single_trade_cash_ratio: float = config.MAX_SINGLE_TRADE_CASH_RATIO,
-    allow_hold: bool = True,
+    allow_hold: bool = False,
 ) -> dict[str, Any]:
     usable_cash = max(0.0, available_cash * max_single_trade_cash_ratio)
     max_buy_quantity = int(usable_cash // current_price) if current_price > 0 else 0
@@ -68,7 +68,7 @@ def parse_decision_json(content: str, constraints: dict[str, Any] | None = None)
         corrections.append(f"order_type:{raw_order_type}->limit")
     order_type = "limit"
     if constraints:
-        allow_hold = bool(constraints.get("allow_hold", True))
+        allow_hold = bool(constraints.get("allow_hold", False))
         reference_price = float(constraints.get("current_price") or 0)
         min_order_unit = int(constraints["min_order_unit"])
         max_buy_quantity = int(constraints["max_buy_quantity"])
@@ -139,7 +139,7 @@ async def make_decision(
     portfolio_summary: str,
     trading_constraints: dict[str, Any],
     *,
-    allow_hold: bool = True,
+    allow_hold: bool = False,
     client: OpenRouterClient | None = None,
 ) -> dict[str, Any]:
     client = client or OpenRouterClient()

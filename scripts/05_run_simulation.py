@@ -3,11 +3,62 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import socket
+import ssl
+import urllib.parse
+import urllib.request
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
+
+_ORIG_GETADDRINFO = socket.getaddrinfo
+_DNS_CACHE: dict[str, str] = {}
+
+
+def _resolve_via_doh(host: str) -> str | None:
+    if host in _DNS_CACHE:
+        return _DNS_CACHE[host]
+    endpoints = (
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/resolve",
+    )
+    for endpoint in endpoints:
+        try:
+            query = urllib.parse.urlencode({"name": host, "type": "A"})
+            url = f"{endpoint}?{query}"
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "accept": "application/dns-json",
+                    "user-agent": "TwinMarketKRDNS/1.0",
+                },
+            )
+            context = ssl._create_unverified_context()
+            with urllib.request.urlopen(req, timeout=5, context=context) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            answers = payload.get("Answer") or []
+            for answer in answers:
+                ip = answer.get("data")
+                if ip:
+                    _DNS_CACHE[host] = str(ip)
+                    return _DNS_CACHE[host]
+        except Exception:
+            continue
+    return None
+
+
+def _patched_getaddrinfo(host, port, *args, **kwargs):
+    if isinstance(host, str) and host and not host.replace(".", "").isdigit():
+        ip = _resolve_via_doh(host)
+        if ip:
+            return _ORIG_GETADDRINFO(ip, port, *args, **kwargs)
+    return _ORIG_GETADDRINFO(host, port, *args, **kwargs)
+
+
+socket.getaddrinfo = _patched_getaddrinfo
 
 from twinmarket_kr.simulation import run_simulation
 
@@ -29,8 +80,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--decision-space",
-        choices=("buy_hold_sell", "buy_sell_only"),
-        default="buy_hold_sell",
+        choices=("buy_sell_only",),
+        default="buy_sell_only",
         help="Allowed trading actions for the decision parser.",
     )
     parser.add_argument("--balanced-depths", action="store_true")
