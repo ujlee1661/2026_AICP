@@ -1,90 +1,335 @@
 # TwinMarket Korea
 
-LLM 기반 에이전트 100명이 삼성전자(005930) 단일 종목을 거래하는 시장 시뮬레이션 프로젝트.
+삼성전자(`005930`) 단일 종목을 대상으로, LLM 기반 개인 투자자 에이전트들이 뉴스와 시장 정보, 포트폴리오 상태, 커뮤니티 반응을 읽고 주문을 제출하는 시장 시뮬레이션 프로젝트입니다.
 
----
+현재 코드는 다음 흐름을 기준으로 동작합니다.
 
-## 변경 기록 (2026-06-09)
+```text
+원천 데이터 준비
+  -> 페르소나 100명 구성
+  -> 뉴스 전처리 및 일별 뉴스 선택
+  -> 주가 데이터 DB 적재
+  -> 초기 포트폴리오와 초기 belief 생성
+  -> 일별 시뮬레이션 실행
+  -> 로그, PDF 리포트, 실제 개인 투자자 순거래 방향 검증
+```
 
-- 뉴스 원본 pkl을 루트 `data/`로 정리하고 `outputs/processed_news.csv`, `outputs/daily_news_selection.csv` 생성 흐름을 확인했다.
-- `news_interpretation` LLM 단계와 `market_analysis` LLM 단계를 일별 사이클에 연결했다.
-- `news_depth`에 따라 Depth 1은 일일 뉴스 본문 최대 3개, Depth 2는 최근 7일 검색 결과와 추가 본문 최대 5개를 context에 반영한다.
+## 디렉터리 구조
 
-## 변경 기록 (2026-06-10)
+```text
+.
+├── config.py                         # 전역 경로, 종목, 수수료, 커뮤니티, LLM 설정
+├── data/                             # 원천 데이터와 고정 입력 파일
+├── outputs/
+│   ├── sys_100.db                    # 선별된 100명 에이전트 DB
+│   ├── sim.db                        # 시뮬레이션 상태 DB
+│   ├── processed_news.csv            # 정제된 뉴스 전체
+│   ├── daily_news_selection.csv      # 일별 선택 뉴스
+│   ├── logs/                         # 실행별 상세 로그
+│   └── reports/                      # PDF 보고서
+├── scripts/                          # 단계별 실행 스크립트
+├── twinmarket_kr/                    # 시뮬레이션 패키지
+├── validation/                       # 실제 투자자별 순거래 방향 검증
+└── News_Scraper/                     # 뉴스 수집 보조 스크립트
+```
 
-- `news_depth`를 Depth 0/1/2로 재정의했다. Depth 0은 헤드라인만, Depth 1은 당일 10개 요약 전체, Depth 2는 추가 LLM 기반 검색 결과 10개를 반영한다.
-- 시뮬레이션 재실행 시 `sim.db`의 런타임 테이블을 정리하고, 체결 결과 기준으로 `trade_log` 상태를 갱신하도록 수정했다.
-- 시뮬레이션 로그는 실행마다 `outputs/logs/current`로 새로 작성되며 이전 로그 폴더는 정리된다.
+## 주요 입력과 출력
 
-## 변경 기록 (2026-06-11)
+| 구분 | 경로 | 설명 |
+| --- | --- | --- |
+| 페르소나 풀 | `data/sys_1000.csv` | 후보 개인 투자자 페르소나 |
+| 고정 슬롯 | `data/fixed_slots.csv` | 100명 선별에 사용할 분포 슬롯 |
+| 원천 뉴스 | `data/samsung_news_raw.pkl` | 뉴스 전처리 입력 |
+| 주가 데이터 | `data/stock_data.csv` | 삼성전자 OHLCV 및 기술적 지표 |
+| 100명 에이전트 DB | `outputs/sys_100.db` | `agents` 테이블 |
+| 시뮬레이션 DB | `outputs/sim.db` | belief, 포트폴리오, 주문, 체결, 커뮤니티 테이블 |
+| 실행 로그 | `outputs/logs/<run_id>/` | CSV/JSONL 상세 로그 |
+| 최신 실행 포인터 | `outputs/logs/current` | 최신 run directory를 가리키는 링크 또는 폴더 |
 
-- Depth 2 에이전트는 `search_needed` 판단값과 무관하게 `depth2_search_keywords`에 해당하는 `search_keywords`가 있으면 항상 최근 7일 뉴스 풀에서 추가 검색을 수행하도록 수정했다.
-- `prompts/news_agent.txt`에서 Depth 2 추가 검색을 선택 행동이 아닌 기본 행동으로 명시하고, `search_needed=false`인 경우에도 검색 키워드 3~8개를 반드시 생성하도록 안내했다.
-- `depth2_flow.step2_pre_search_thinking.search_needed`는 검색 실행 제어값이 아니라 판단 기록용 필드로 유지된다.
+## 환경 설정
 
-## 변경 기록 (2026-06-17)
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-- `outputs/sys_100.db`의 기존 `agents` 테이블에서 `news_depth`와 `persona_prompt`만 갱신했다.
-- `ini_cash`, `strategy`, `bh_annual_turnover_category`, `trade_count_category`, `age_group`, `user_type` 점수를 합산해 총점 내림차순으로 정렬하고, 경계 동점은 `ini_cash` 상위, `strategy=value`, `trade_count_category` 낮은 순서로 배정했다.
-- 최종 분포는 Depth 0 정확히 30명, Depth 1 정확히 55명, Depth 2 정확히 15명이다.
+LLM 호출은 OpenRouter API를 사용합니다. 프로젝트 루트에 `.env`를 만들고 필요한 값을 설정합니다.
 
-## 변경 기록 (2026-06-18)
+```bash
+OPENROUTER_API_KEY=...
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_MODEL=openai/gpt-4o
+OPENROUTER_COMMUNITY_MODEL=openai/gpt-4o-mini
+```
 
-- 거래 수수료율을 거래대금의 0.05%(`config.COMMISSION_RATE = 0.0005`)로 적용한다.
-- `ExchangeAgent`는 체결된 에이전트 거래마다 `executed_price * executed_quantity * COMMISSION_RATE`를 `fee`로 계산한다.
-- 합성 잔차 유동성인 `COUNTERSIDE` 거래는 수수료 대상에서 제외한다.
-- `MemoryAgent`는 매수 시 `가격 * 수량 + 수수료`만큼 현금을 차감하고, 매도 시 `가격 * 수량 - 수수료`만큼 현금을 증가시키며 실현손익에서도 수수료를 차감한다.
-- `trade_log`와 `exchange_fills.csv`에는 체결별 수수료가 기록된다.
+참고: `requirements.txt`에는 현재 LLM 클라이언트 중심의 최소 의존성이 들어 있습니다. 시장 데이터 수집, 리포트 생성, 검증 스크립트를 새 환경에서 실행하려면 `pandas`, `yfinance`, `reportlab` 등이 추가로 필요할 수 있습니다.
 
-## 변경 기록 (2026-06-22)
+## 전체 실행 순서
 
-- `validation/` 폴더를 추가하고 삼성전자 실제 투자자별 순거래 데이터 `data_trading_value.csv`, `data_trading_volume.csv`를 해당 폴더로 이동했다.
-- `validation/validate_trading_direction.py`는 시뮬레이션 로그의 LLM 에이전트 일별 순매수/순매도 방향을 실제 개인 투자자(`Individuals`) 순거래 방향과 비교한다.
-- 검증은 거래대금(value)과 거래량(volume)을 모두 산출하며, `COUNTERSIDE` 흐름도 실제 기관, 외인, 기타법인 순거래 방향과 보조 비교한다.
-- 방향 일치율은 원본 순거래값의 부호 기준으로 유지하고, 양상 비교는 `max_abs`, `z_score`, `cumulative_max_abs` 정규화 지표를 함께 산출한다.
-- 검증 실행 결과는 `validation/outputs/<run_id>/` 아래에 `daily_comparison_value.csv`, `daily_comparison_volume.csv`, `normalized_comparison_value.csv`, `normalized_comparison_volume.csv`, `summary_metrics.json`, `validation_report.pdf`로 생성된다.
+### 1. 시장 데이터 수집
 
----
-
-## 추가된 파일 (2026-06-02)
-
-### `scripts/00_fetch_market_data.py`
-Yahoo Finance에서 삼성전자 주가 데이터와 매크로 데이터를 수집하는 스크립트.
-
-- 삼성전자(005930.KS): 2025-01-01 ~ 현재
-- 지표 계산을 위해 2024-07-01부터 데이터를 받아온 뒤 2025-01-01 이전 행은 제거
-- KOSPI 지수 및 USD/KRW 환율도 함께 수집
+Yahoo Finance에서 삼성전자 주가, KOSPI, USD/KRW 데이터를 받아옵니다.
 
 ```bash
 python scripts/00_fetch_market_data.py
 ```
 
----
+생성 파일:
 
-### `data/stock_data.csv`
-삼성전자 일별 주가 및 기술적 지표. `FundamentalAgent`가 직접 읽어 `sim.db`의 `StockData` 테이블에 적재한다.
+- `data/stock_data.csv`
+- `data/macro_data.csv`
 
-| 컬럼 | 설명 |
-|------|------|
-| `date` | 거래일 (YYYY-MM-DD) |
-| `open / high / low / close` | 시가 / 고가 / 저가 / 종가 (원) |
-| `adj_close` | 수정 종가 |
-| `volume` | 거래량 |
-| `pct_chg` | 전일 대비 수익률 |
-| `volume_chg` | 전일 대비 거래량 변화율 |
-| `ma5 / ma20` | 5일 / 20일 이동평균 |
-| `volatility_20d` | 20일 로그수익률 표준편차 |
-| `rsi_14` | 14일 RSI |
-| `macd / macd_signal / macd_hist` | MACD (12-26-9) |
-| `bb_upper / bb_lower / bb_pct` | 볼린저밴드 상단 / 하단 / %B |
+### 2. 100명 에이전트 구성
 
----
+`data/sys_1000.csv` 후보군과 `data/fixed_slots.csv`를 이용해 100명 에이전트를 선별합니다.
 
-### `data/macro_data.csv`
-KOSPI 지수 및 USD/KRW 환율 일별 데이터. 에이전트 belief 형성의 거시경제 맥락 참고용.
+```bash
+python scripts/01_build_persona.py
+```
 
-| 컬럼 | 설명 |
-|------|------|
-| `date` | 거래일 |
-| `kospi_close / kospi_pct_chg` | KOSPI 종가 / 전일 대비 수익률 |
-| `usdkrw / usdkrw_pct_chg` | USD/KRW 환율 / 전일 대비 변화율 |
+생성 파일:
+
+- `outputs/sys_100.db`
+- `outputs/persona_validation_report.json`
+
+### 3. 뉴스 전처리
+
+원천 뉴스 pkl을 정제하고, 일별 최대 10개 뉴스 묶음을 만듭니다. 기본 카테고리 목표는 종목 5개, 섹터 3개, 경제 2개입니다.
+
+```bash
+python scripts/02_prepare_news.py --seed 2
+```
+
+생성 파일:
+
+- `outputs/processed_news.csv`
+- `outputs/daily_news_selection.csv`
+
+### 4. 주가 데이터 DB 적재
+
+```bash
+python scripts/03_load_stock_data.py
+```
+
+`data/stock_data.csv`를 `outputs/sim.db`의 `StockData` 테이블에 적재합니다.
+
+### 5. 초기 포트폴리오 생성
+
+```bash
+python scripts/02_init_memory.py
+```
+
+각 에이전트의 초기 현금 기준으로 `portfolio_state`의 `turn=0` 상태를 생성합니다.
+
+### 6. 초기 belief 생성
+
+LLM 없이 템플릿 기반 초기 belief를 만들려면:
+
+```bash
+python scripts/04_generate_initial_beliefs.py --offline
+```
+
+LLM으로 생성하려면:
+
+```bash
+python scripts/04_generate_initial_beliefs.py
+```
+
+## 시뮬레이션 실행
+
+대표 실행 예시는 다음과 같습니다.
+
+```bash
+python scripts/05_run_simulation.py \
+  --max-agents 50 \
+  --balanced-depths \
+  --seed 2 \
+  --start-date 2026-02-27 \
+  --end-date 2026-05-12 \
+  --concurrency 8
+```
+
+주요 옵션:
+
+| 옵션 | 설명 |
+| --- | --- |
+| `--max-agents` | 실행할 에이전트 수. 미지정 시 전체 사용 |
+| `--max-days` | 실행할 거래일 수 |
+| `--start-date`, `--end-date` | 실행 기간 필터 |
+| `--concurrency` | 에이전트 LLM 호출 동시성 |
+| `--random-agents` | 앞에서부터 자르지 않고 무작위 샘플 |
+| `--balanced-depths` | Depth 0/1/2를 최대한 균형 있게 샘플 |
+| `--seed` | 무작위 샘플 재현용 seed |
+| `--information-mode` | 의사결정 시점의 정보 절단 방식 |
+| `--no-logs` | 상세 로그 생성을 끔 |
+
+`--information-mode` 값:
+
+- `pre_close_cutoff`: 전일 장마감 이후부터 당일 주문 마감 시점까지의 뉴스와 전일 시장 데이터를 사용합니다.
+- `prior_close`: 전일 시장 데이터와 전일까지의 뉴스만 사용합니다.
+- `same_day`: 당일 시장 데이터와 당일 뉴스를 사용합니다.
+
+현재 주문 결정 공간은 `buy_sell_only`입니다. 즉, LLM 의사결정은 매수 또는 매도 주문 제출을 기본으로 하며, 제약 조건상 주문이 불가능할 때만 미제출 상태가 됩니다.
+
+## 일별 코드 흐름
+
+`scripts/05_run_simulation.py`는 `twinmarket_kr.simulation.run_simulation()`을 호출합니다. 하루 거래일마다 흐름은 다음과 같습니다.
+
+1. `MemoryAgent`가 이전 belief, 직전 포트폴리오, 마지막 행동 이유를 읽습니다.
+2. `FundamentalAgent`가 기준일의 시장 피처를 읽습니다.
+3. `NewsAgent`가 에이전트의 `news_depth`에 맞는 뉴스 컨텍스트를 구성합니다.
+4. Depth 2 에이전트는 추가 검색 키워드를 만들고, 최근 뉴스 풀에서 관련 뉴스를 더 읽습니다.
+5. LLM이 뉴스 해석(`interpret_news`)을 생성합니다.
+6. LLM이 belief를 업데이트하고 `belief_history`에 저장합니다.
+7. LLM이 시장 분석과 주문 결정을 생성합니다.
+8. 주문 가능 수량, 현금, 보유 수량 제약을 적용해 주문을 구성합니다.
+9. `ExchangeAgent`가 일별 주문을 실제 종가에 앵커링해 체결합니다.
+10. 수수료를 반영해 `trade_log`, `TradingDetails`, `portfolio_state`를 갱신합니다.
+11. 커뮤니티 기능이 켜져 있으면 게시글 작성, 읽기, 반응, Best 글 선정, 다음 날 community thinking 저장을 수행합니다.
+
+수수료율은 `config.COMMISSION_RATE = 0.0005`입니다. 합성 잔차 유동성 주체인 `COUNTERSIDE`는 수수료 대상에서 제외됩니다.
+
+## 뉴스 Depth
+
+| Depth | 동작 |
+| --- | --- |
+| 0 | 일별 선택 뉴스의 헤드라인 중심 컨텍스트 |
+| 1 | 일별 선택 뉴스의 요약 본문까지 반영 |
+| 2 | 기본 뉴스 컨텍스트에 더해 LLM 키워드 기반 추가 뉴스 검색 결과를 반영 |
+
+Depth 1 이상 에이전트는 커뮤니티 게시글 작성과 읽기 대상이 됩니다. 커뮤니티 읽기 개수는 `config.py`의 `COMMUNITY_DEPTH1_READ_LIMIT`, `COMMUNITY_DEPTH2_READ_LIMIT`로 제어합니다.
+
+## 거래 체결 방식
+
+`ExchangeAgent`는 매수/매도 지정가 주문을 모아 종목별로 처리합니다.
+
+- 초기 `config.N_WARMUP` 거래일은 warmup 체결 로직을 사용합니다.
+- 이후에는 실제 종가를 기준 가격으로 삼고, 전일 종가 대비 `config.CIRCUIT_BREAKER` 범위 안에서 체결합니다.
+- 수급 불균형은 `COUNTERSIDE` 주문을 추가해 실제 종가 앵커 체결을 보정합니다.
+- 체결 결과는 `TradingDetails`와 실행 로그의 `exchange_fills.csv`, `daily_exchange_summary.csv`에 남습니다.
+
+## 커뮤니티 기능
+
+커뮤니티는 `config.py`에서 제어합니다.
+
+```python
+ENABLE_COMMUNITY = True
+ENABLE_COMMUNITY_POSTING = True
+ENABLE_COMMUNITY_READING = True
+```
+
+커뮤니티 단계는 매일 체결 이후 실행됩니다.
+
+- Depth 1 이상 에이전트가 매매 결과와 당일 판단을 바탕으로 글을 쓸 수 있습니다.
+- 에이전트별 수익률, 자산, 영향력 기준으로 뱃지를 계산합니다.
+- 에이전트는 보이는 게시글 후보 중 일부를 읽고 반응합니다.
+- 일별 Best 게시글을 선정하고, 다음 날 의사결정 컨텍스트에 사용할 community log를 저장합니다.
+
+## 로그와 리포트
+
+시뮬레이션을 실행하면 `outputs/logs/<run_id>/`에 상세 로그가 생성됩니다.
+
+주요 로그:
+
+| 파일 | 내용 |
+| --- | --- |
+| `run_metadata.json` | 실행 옵션과 에이전트 목록 |
+| `run_complete.json` | 완료 상태와 로그 경로 |
+| `agent_turns.csv` / `.jsonl` | 에이전트별 컨텍스트, belief, 분석, 주문 결정 |
+| `submitted_orders.csv` | 제출 주문 |
+| `exchange_fills.csv` | 체결 내역 |
+| `daily_exchange_summary.csv` | 일별 주문/체결 요약 |
+| `portfolio_updates.jsonl` | 체결 후 포트폴리오 상태 |
+| `community_*.csv` / `.jsonl` | 커뮤니티 게시글, 선택 화면, 반응, Best 글, 로그 |
+| `errors.jsonl` | 에이전트 턴 오류 |
+
+최신 실행을 PDF로 정리하려면:
+
+```bash
+python scripts/generate_run_report_pdf.py
+python scripts/generate_community_report_pdf.py
+```
+
+특정 실행 로그를 지정하려면:
+
+```bash
+python scripts/generate_run_report_pdf.py \
+  --run-dir outputs/logs/simulation_YYYYMMDD_HHMMSS \
+  --output outputs/reports/simulation_YYYYMMDD_HHMMSS_report.pdf
+
+python scripts/generate_community_report_pdf.py \
+  --run-dir outputs/logs/simulation_YYYYMMDD_HHMMSS \
+  --output outputs/reports/simulation_YYYYMMDD_HHMMSS_community_report.pdf
+```
+
+## 검증
+
+실제 개인 투자자 순거래 방향과 시뮬레이션의 LLM 에이전트 순거래 방향을 비교합니다.
+
+```bash
+python validation/validate_trading_direction.py
+```
+
+특정 실행 로그 검증:
+
+```bash
+python validation/validate_trading_direction.py \
+  --run-dir outputs/logs/simulation_YYYYMMDD_HHMMSS
+```
+
+입력:
+
+- `validation/data_trading_value.csv`
+- `validation/data_trading_volume.csv`
+- `outputs/logs/<run_id>/exchange_fills.csv`
+
+산출물은 `validation/outputs/<run_id>/`에 생성됩니다.
+
+- `daily_comparison_value.csv`
+- `daily_comparison_volume.csv`
+- `normalized_comparison_value.csv`
+- `normalized_comparison_volume.csv`
+- `summary_metrics.json`
+- `validation_report.pdf`
+
+기본 검증은 LLM 에이전트 전체 순거래 방향과 실제 `Individuals` 방향을 비교합니다. 보조 검증은 `COUNTERSIDE` 흐름을 기관, 외국인, 기타법인 흐름과 비교합니다.
+
+## 빠른 점검
+
+데이터 준비 상태를 요약 확인하려면:
+
+```bash
+python scripts/99_validate.py
+```
+
+커뮤니티 포함 2일 smoke test와 전체 입출력 묶음 로그를 만들려면:
+
+```bash
+python scripts/06_run_community_smoke_test.py \
+  --max-agents 3 \
+  --max-days 2 \
+  --concurrency 1
+```
+
+## 핵심 모듈
+
+| 모듈 | 역할 |
+| --- | --- |
+| `twinmarket_kr/simulation.py` | 전체 실행 루프, 일별 주문 처리, 포트폴리오 갱신, 커뮤니티 단계 |
+| `twinmarket_kr/core/daily_cycle.py` | 에이전트 1명의 하루 의사결정 흐름 |
+| `twinmarket_kr/core/collect_context.py` | belief, 포트폴리오, 뉴스, 시장, 커뮤니티 컨텍스트 수집 |
+| `twinmarket_kr/agents/news_agent.py` | 뉴스 전처리, 일별 뉴스 선택, Depth별 뉴스 컨텍스트, 추가 검색 |
+| `twinmarket_kr/agents/fundamental_agent.py` | 주가 데이터 적재와 시장 피처 조회 |
+| `twinmarket_kr/agents/memory_agent.py` | belief, 포트폴리오, 거래 로그 저장과 조회 |
+| `twinmarket_kr/agents/exchange_agent.py` | 주문 체결, 수수료 계산, 체결 DB 저장 |
+| `twinmarket_kr/community/` | 게시글 작성, 읽기, 반응, 뱃지, community thinking |
+| `twinmarket_kr/llm/` | OpenRouter 클라이언트와 LLM 프롬프트 단계 |
+| `twinmarket_kr/run_logger.py` | 실행별 CSV/JSONL 로그 저장 |
+
+## 주의 사항
+
+- 시뮬레이션 시작 시 `outputs/sim.db`의 실행 중 생성 데이터가 초기화됩니다. `StockData`, 초기 belief, 초기 포트폴리오(`turn=0`)는 유지되고, 체결/거래 로그와 `turn>0` belief/포트폴리오/커뮤니티 로그가 새 실행 기준으로 정리됩니다.
+- 시뮬레이션 날짜는 `StockData`와 `daily_news_selection.csv`에 공통으로 존재하는 거래일만 사용합니다.
+- `pre_close_cutoff`와 `prior_close` 모드는 전일 시장 데이터가 필요하므로 첫 거래일은 실행 대상에서 제외될 수 있습니다.
+- LLM 호출 비용과 속도는 에이전트 수, 거래일 수, `--concurrency`, Depth 2 비율, 커뮤니티 설정에 크게 영향을 받습니다.
