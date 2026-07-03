@@ -4,7 +4,7 @@ from collections import Counter
 from typing import Any
 
 
-SYSTEM_USERS = {"COUNTERSIDE", "INSTITUTIONAL"}
+SYSTEM_USERS = {"INSTITUTIONAL"}
 
 
 def num(value: Any, default: float = 0.0) -> float:
@@ -14,6 +14,18 @@ def num(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def row_agent_id(row: dict[str, Any]) -> str:
+    return str(row.get("agent_id") or row.get("user_id") or "")
+
+
+def row_quantity(row: dict[str, Any]) -> float:
+    return num(row.get("quantity") or row.get("executed_quantity") or row.get("filled_quantity"))
+
+
+def row_price(row: dict[str, Any]) -> float:
+    return num(row.get("price") or row.get("executed_price") or row.get("announced_price") or row.get("close_price"))
 
 
 def pick_representative_agents(
@@ -64,15 +76,15 @@ def pick_representative_agents(
 
     impact = Counter()
     for row in order_rows:
-        agent_id = str(row.get("agent_id") or row.get("user_id") or "")
+        agent_id = row_agent_id(row)
         if agent_id in SYSTEM_USERS:
             continue
-        impact[agent_id] += abs(num(row.get("quantity"))) * max(num(row.get("price")), 1)
+        impact[agent_id] += abs(row_quantity(row)) * max(row_price(row), 1)
     for row in fill_rows:
-        agent_id = str(row.get("agent_id") or row.get("user_id") or "")
+        agent_id = row_agent_id(row)
         if agent_id in SYSTEM_USERS:
             continue
-        impact[agent_id] += abs(num(row.get("executed_quantity"))) * max(num(row.get("executed_price")), 1) * 2
+        impact[agent_id] += abs(row_quantity(row)) * max(row_price(row), 1) * 2
     if impact:
         agent_id, value = sorted(impact.items(), key=lambda item: (-item[1], item[0]))[0]
         add(agent_id, f"주문/체결 금액 영향도 최상위({value:,.0f})")

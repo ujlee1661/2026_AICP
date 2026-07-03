@@ -25,7 +25,6 @@ from reportlab.platypus import Flowable, PageBreak, Paragraph, SimpleDocTemplate
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VALIDATION_DIR = PROJECT_ROOT / "validation"
 DEFAULT_RUN_DIR = PROJECT_ROOT / "outputs" / "logs" / "current"
-COUNTERSIDE_USER_ID = "COUNTERSIDE"
 ACTUAL_INVESTOR_COLUMNS = [
     "Individuals",
     "Subtotal-Institutions",
@@ -341,12 +340,8 @@ def load_simulation(run_dir: Path, stock_code: str) -> tuple[str, dict[str, dict
         lambda: {
             "llm_volume": 0.0,
             "llm_value": 0.0,
-            "counterside_volume": 0.0,
-            "counterside_value": 0.0,
             "llm_buy_volume": 0.0,
             "llm_sell_volume": 0.0,
-            "counterside_buy_volume": 0.0,
-            "counterside_sell_volume": 0.0,
             "closing_price": 0.0,
             "market_return": 0.0,
         }
@@ -357,7 +352,7 @@ def load_simulation(run_dir: Path, stock_code: str) -> tuple[str, dict[str, dict
         close_by_date: dict[str, float] = {}
         for row in daily_rows:
             date = parse_date(row["date"])
-            close_by_date[date] = num(row.get("closing_price"))
+            close_by_date[date] = num(row.get("close_price") or row.get("closing_price") or row.get("announced_price"))
         previous_close = None
         for date, close in sorted(close_by_date.items()):
             daily[date]["closing_price"] = close
@@ -368,17 +363,17 @@ def load_simulation(run_dir: Path, stock_code: str) -> tuple[str, dict[str, dict
         if str(row.get("stock_code") or stock_code) != stock_code:
             continue
         date = parse_date(row["date"])
-        qty = num(row.get("executed_quantity"))
+        qty = num(row.get("quantity") or row.get("executed_quantity") or row.get("filled_quantity"))
         price = num(row.get("executed_price"))
-        signed_qty = qty if row.get("direction") == "buy" else -qty
+        action = str(row.get("action") or row.get("direction") or "").lower()
+        signed_qty = qty if action == "buy" else -qty
         signed_value = signed_qty * price
-        prefix = "counterside" if row.get("user_id") == COUNTERSIDE_USER_ID else "llm"
-        daily[date][f"{prefix}_volume"] += signed_qty
-        daily[date][f"{prefix}_value"] += signed_value
+        daily[date]["llm_volume"] += signed_qty
+        daily[date]["llm_value"] += signed_value
         if signed_qty > 0:
-            daily[date][f"{prefix}_buy_volume"] += qty
+            daily[date]["llm_buy_volume"] += qty
         elif signed_qty < 0:
-            daily[date][f"{prefix}_sell_volume"] += qty
+            daily[date]["llm_sell_volume"] += qty
     return run_id, dict(daily)
 
 
@@ -426,7 +421,6 @@ def build_comparison_rows(
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     sim_key = "llm_value" if label == "value" else "llm_volume"
-    counter_key = "counterside_value" if label == "value" else "counterside_volume"
     for date in sorted(set(actual) & set(simulation)):
         sim = simulation[date]
         actual_row = actual[date]
@@ -434,8 +428,6 @@ def build_comparison_rows(
             "date": date,
             "llm_net": sim[sim_key],
             "llm_direction": direction_label(sim[sim_key]),
-            "counterside_net": sim[counter_key],
-            "counterside_direction": direction_label(sim[counter_key]),
             "market_return": sim.get("market_return", 0.0),
         }
         for column in ACTUAL_INVESTOR_COLUMNS:
@@ -454,7 +446,6 @@ def skip_initial_rows(rows: list[dict[str, Any]], days: int) -> list[dict[str, A
 
 def summarize_dimension(rows: list[dict[str, Any]], metric_key: str) -> dict[str, Any]:
     llm_values = [num(row["llm_net"]) for row in rows]
-    counterside_values = [num(row["counterside_net"]) for row in rows]
     actual_individuals = [num(row["Individuals"]) for row in rows]
     market_returns = [num(row.get("market_return")) for row in rows]
     primary_metrics = compute_direction_metrics(llm_values, actual_individuals)
@@ -470,17 +461,12 @@ def summarize_dimension(rows: list[dict[str, Any]], metric_key: str) -> dict[str
         },
         "llm_vs_individuals": bundle,
         "baselines_vs_individuals": baseline_metrics(actual_individuals, market_returns),
-        "counterside_vs_investor_groups": {},
     }
-    for column in ACTUAL_INVESTOR_COLUMNS:
-        summary["counterside_vs_investor_groups"][column] = metric_bundle(
-            counterside_values, [num(row[column]) for row in rows]
-        )
     return summary
 
 
 def build_normalized_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    series_names = ["llm_net", "counterside_net", *ACTUAL_INVESTOR_COLUMNS]
+    series_names = ["llm_net", *ACTUAL_INVESTOR_COLUMNS]
     raw_series = {name: [num(row[name]) for row in rows] for name in series_names}
     max_abs_series = {name: max_abs_normalize(values) for name, values in raw_series.items()}
     z_score_series = {name: z_score_normalize(values) for name, values in raw_series.items()}
@@ -491,7 +477,6 @@ def build_normalized_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         normalized: dict[str, Any] = {
             "date": row["date"],
             "llm_direction": row["llm_direction"],
-            "counterside_direction": row["counterside_direction"],
             "llm_matches_individuals": row["llm_matches_individuals"],
         }
         for name in series_names:
@@ -504,8 +489,8 @@ def build_normalized_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def normalized_fieldnames() -> list[str]:
-    series_names = ["llm_net", "counterside_net", *ACTUAL_INVESTOR_COLUMNS]
-    fields = ["date", "llm_direction", "counterside_direction", "llm_matches_individuals"]
+    series_names = ["llm_net", *ACTUAL_INVESTOR_COLUMNS]
+    fields = ["date", "llm_direction", "llm_matches_individuals"]
     for name in series_names:
         fields.extend(
             [
@@ -609,19 +594,6 @@ def metric_table(title: str, summary: dict[str, Any], styles: dict[str, Paragrap
             score_text(primary["cumulative_max_abs_normalized"]["pearson_correlation"]),
         ]
     )
-    for investor, metric in summary["counterside_vs_investor_groups"].items():
-        rows.append(
-            [
-                f"COUNTERSIDE vs {investor}",
-                metric["days"],
-                pct(metric["direction_match_rate"]),
-                pct(metric["balanced_accuracy"]),
-                pct(metric["buy_recall"]),
-                pct(metric["sell_recall"]),
-                score_text(metric["max_abs_normalized"]["pearson_correlation"]),
-                score_text(metric["cumulative_max_abs_normalized"]["pearson_correlation"]),
-            ]
-        )
     return [
         para(title, styles["KHeading2"]),
         table(
@@ -752,7 +724,7 @@ def build_report(
     if skipped_days:
         story.append(
             para(
-                f"검증 기준: COUNTERSIDE가 개입하지 않는 초기 warmup {skipped_days}거래일을 제외하고 비교했다.",
+                f"검증 기준: 초기 {skipped_days}거래일을 제외하고 비교했다.",
                 styles["KBody"],
             )
         )
@@ -806,18 +778,15 @@ def build_report(
         dates = [row["date"] for row in value_rows]
         value_llm = [num(row["llm_net"]) for row in value_rows]
         value_individuals = [num(row["Individuals"]) for row in value_rows]
-        value_counterside = [num(row["counterside_net"]) for row in value_rows]
         volume_llm = [num(row["llm_net"]) for row in volume_rows]
         volume_individuals = [num(row["Individuals"]) for row in volume_rows]
-        volume_counterside = [num(row["counterside_net"]) for row in volume_rows]
         story.append(
             NormalizedLineChart(
-                "Value MaxAbs 정규화 순거래 흐름: LLM vs 개인 vs COUNTERSIDE",
+                "Value MaxAbs 정규화 순거래 흐름: LLM vs 개인",
                 dates,
                 [
                     ("LLM", max_abs_normalize(value_llm), colors.HexColor("#2563eb")),
                     ("Individuals", max_abs_normalize(value_individuals), colors.HexColor("#16a34a")),
-                    ("COUNTERSIDE", max_abs_normalize(value_counterside), colors.HexColor("#dc2626")),
                 ],
                 170 * mm,
             )
@@ -825,12 +794,11 @@ def build_report(
         story.append(Spacer(1, 4 * mm))
         story.append(
             NormalizedLineChart(
-                "Volume MaxAbs 정규화 순거래 흐름: LLM vs 개인 vs COUNTERSIDE",
+                "Volume MaxAbs 정규화 순거래 흐름: LLM vs 개인",
                 [row["date"] for row in volume_rows],
                 [
                     ("LLM", max_abs_normalize(volume_llm), colors.HexColor("#2563eb")),
                     ("Individuals", max_abs_normalize(volume_individuals), colors.HexColor("#16a34a")),
-                    ("COUNTERSIDE", max_abs_normalize(volume_counterside), colors.HexColor("#dc2626")),
                 ],
                 170 * mm,
             )
@@ -894,22 +862,6 @@ def make_interpretation(summary: dict[str, Any]) -> str:
     volume_corr = summary["volume"]["llm_vs_individuals"]["max_abs_normalized"]["pearson_correlation"]
     value_cumulative_corr = summary["value"]["llm_vs_individuals"]["cumulative_max_abs_normalized"]["pearson_correlation"]
     volume_cumulative_corr = summary["volume"]["llm_vs_individuals"]["cumulative_max_abs_normalized"]["pearson_correlation"]
-    best_counter = []
-    for dimension in ("value", "volume"):
-        metrics = summary[dimension]["counterside_vs_investor_groups"]
-        ranked = sorted(
-            metrics.items(),
-            key=lambda item: (
-                -1 if item[1]["direction_match_rate"] is None else item[1]["direction_match_rate"],
-                -1
-                if item[1]["max_abs_normalized"]["cosine_similarity"] is None
-                else item[1]["max_abs_normalized"]["cosine_similarity"],
-            ),
-            reverse=True,
-        )
-        if ranked:
-            investor, metric = ranked[0]
-            best_counter.append(f"{dimension}: {investor} 방향 일치율 {pct(metric['direction_match_rate'])}")
     return (
         f"LLM 에이전트와 실제 개인 투자자의 방향 일치율은 Value {pct(value_match)}, Volume {pct(volume_match)}이고, "
         f"balanced accuracy는 Value {pct(value_balanced)}, Volume {pct(volume_balanced)}이다. "
@@ -917,9 +869,7 @@ def make_interpretation(summary: dict[str, Any]) -> str:
         f"MaxAbs 정규화 상관계수는 Value {score_text(value_corr)}, Volume {score_text(volume_corr)}이며, "
         f"누적 정규화 상관계수는 Value {score_text(value_cumulative_corr)}, Volume {score_text(volume_cumulative_corr)}이다. "
         "방향 일치율이 높고 정규화 상관계수/코사인 유사도가 양수로 안정적이면 실제 개인 투자자 흐름을 시뮬레이션이 어느 정도 "
-        "재현한다고 해석할 수 있다. COUNTERSIDE 보조 비교에서 가장 가까운 실제 투자자 그룹은 "
-        + "; ".join(best_counter)
-        + "이다."
+        "재현한다고 해석할 수 있다."
     )
 
 
@@ -948,8 +898,6 @@ def main() -> None:
             "date",
             "llm_net",
             "llm_direction",
-            "counterside_net",
-            "counterside_direction",
             "market_return",
             *[item for column in ACTUAL_INVESTOR_COLUMNS for item in (column, f"{column}_direction")],
             "llm_matches_individuals",

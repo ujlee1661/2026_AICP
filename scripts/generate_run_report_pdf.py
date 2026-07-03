@@ -101,15 +101,31 @@ def action_ko(action: str) -> str:
     return {"buy": "매수", "sell": "매도", "hold": "보유"}.get(action, action)
 
 
+def row_agent_id(row: dict[str, Any]) -> str:
+    return str(row.get("agent_id") or row.get("user_id") or "")
+
+
+def row_action(row: dict[str, Any]) -> str:
+    return str(row.get("action") or row.get("direction") or "").lower()
+
+
+def row_quantity(row: dict[str, Any]) -> float:
+    return num(row.get("quantity") or row.get("executed_quantity") or row.get("filled_quantity"))
+
+
+def row_close(row: dict[str, Any]) -> float:
+    return num(row.get("close_price") or row.get("closing_price") or row.get("announced_price"))
+
+
 def order_price_text(row: dict[str, Any]) -> str:
-    return money(row.get("price"))
+    return money(row.get("announced_price") or row.get("price") or row.get("executed_price"))
 
 
 def fill_result_text(fills: list[dict[str, Any]]) -> str:
     if not fills:
         return "미체결"
     return " / ".join(
-        f"{int(num(fill.get('executed_quantity'))):,}주@{money(fill.get('executed_price'))}"
+        f"{int(row_quantity(fill)):,}주@{money(fill.get('executed_price'))}"
         for fill in fills
     )
 
@@ -120,19 +136,19 @@ def order_book_rows(
     fills_by_order: dict[tuple[str, str, str], list[dict[str, str]]],
 ) -> list[list[str]]:
     day_orders = orders_by_date.get(date, [])
-    sells = [row for row in day_orders if row.get("direction") == "sell"]
-    buys = [row for row in day_orders if row.get("direction") == "buy"]
+    sells = [row for row in day_orders if row_action(row) == "sell"]
+    buys = [row for row in day_orders if row_action(row) == "buy"]
 
     def sell_key(row: dict[str, str]) -> tuple[int, float, str]:
-        return (0, num(row.get("price")), row.get("agent_id", ""))
+        return (0, num(row.get("price") or row.get("announced_price")), row.get("agent_id", ""))
 
     def buy_key(row: dict[str, str]) -> tuple[int, float, str]:
-        return (0, -num(row.get("price")), row.get("agent_id", ""))
+        return (0, -num(row.get("price") or row.get("announced_price")), row.get("agent_id", ""))
 
     sells.sort(key=sell_key)
     buys.sort(key=buy_key)
     row_count = max(len(sells), len(buys), 1)
-    rows = [["매도 주문", "매도 호가", "매도 체결", "매수 호가", "매수 주문", "매수 체결"]]
+    rows = [["매도 주문", "공시가", "매도 체결", "공시가", "매수 주문", "매수 체결"]]
     for idx in range(row_count):
         sell = sells[idx] if idx < len(sells) else None
         buy = buys[idx] if idx < len(buys) else None
@@ -330,15 +346,16 @@ def main() -> None:
     fills_by_order = defaultdict(list)
     for row in fill_rows:
         fills_by_date[row["date"]].append(row)
-        fills_by_agent[row["user_id"]].append(row)
-        if row["user_id"] not in {"COUNTERSIDE", "INSTITUTIONAL"}:
-            fills_by_order[(row["date"], row["user_id"], row["direction"])].append(row)
+        aid = row_agent_id(row)
+        fills_by_agent[aid].append(row)
+        if aid != "INSTITUTIONAL":
+            fills_by_order[(row["date"], aid, row_action(row))].append(row)
 
     orders_by_date = defaultdict(list)
     for row in order_rows:
         orders_by_date[row["date"]].append(row)
 
-    final_close = num(daily_rows[-1]["closing_price"])
+    final_close = row_close(daily_rows[-1])
     initial_values = load_initial_values(list(meta["agent_ids"]))
     final_states = latest_portfolios(portfolio_updates, final_close, initial_values)
     representative_agents, representative_reasons = pick_representative_agents(
@@ -369,8 +386,7 @@ def main() -> None:
 
     action_counts = Counter(row["action"] for row in agent_rows)
     total_order_qty = sum(int(num(row["quantity"])) for row in order_rows)
-    total_fill_qty = sum(int(num(row["executed_quantity"])) for row in fill_rows)
-    total_fees = sum(num(row["fee"]) for row in fill_rows)
+    total_fill_qty = sum(int(row_quantity(row)) for row in fill_rows)
     story.append(para("1. 실행 개요", styles["KHeading1"]))
     overview = [
         ["항목", "내용"],
@@ -379,7 +395,7 @@ def main() -> None:
             f"에이전트 {meta['agent_count']}명, {meta['date_count']}거래일, "
             f"기간={meta.get('start_date') or daily_rows[0]['date']}~{meta.get('end_date') or daily_rows[-1]['date']}, "
             f"seed={meta['random_seed']}, concurrency={meta['concurrency']}, balanced_depths={meta.get('balanced_depths', False)}, "
-            f"information_mode={meta.get('information_mode', 'pre_close_cutoff')}, limit_only={meta.get('limit_only_orders', True)}",
+            f"information_mode={meta.get('information_mode', 'pre_close_cutoff')}, exchange_mode={meta.get('exchange_mode', 'announced_price_binary')}",
         ],
         ["전체 에이전트", ", ".join(meta["agent_ids"])],
         [
@@ -387,7 +403,7 @@ def main() -> None:
             ", ".join(f"{agent_id} ({representative_reasons.get(agent_id, '')})" for agent_id in representative_agents),
         ],
         ["전체 판단", f"총 {len(agent_rows)}건: 매수 {action_counts.get('buy', 0)}건, 보유 {action_counts.get('hold', 0)}건, 매도 {action_counts.get('sell', 0)}건"],
-        ["주문/체결", f"제출 주문 {len(order_rows)}건, 제출 수량 {total_order_qty:,}주, 체결 수량 {total_fill_qty:,}주, 수수료 합계 {total_fees:,.0f}원"],
+        ["주문/체결", f"제출 주문 {len(order_rows)}건, 제출 수량 {total_order_qty:,}주, 체결 수량 {total_fill_qty:,}주"],
         ["로그 위치", str(RUN_DIR)],
         ["완료 정보", f"{complete.get('run_id')} / {complete.get('date_count', meta['date_count'])}일 실행 완료"],
     ]
@@ -436,10 +452,10 @@ def main() -> None:
         turns = by_date[date]
         counts = Counter(t["decision"]["action"] for t in turns)
         day_orders = orders_by_date.get(date, [])
-        order_counts = Counter(order["direction"] for order in day_orders)
-        agent_fills = [fill for fill in fills_by_date.get(date, []) if fill["user_id"] not in {"COUNTERSIDE", "INSTITUTIONAL"}]
-        buy_qty = sum(int(num(fill["executed_quantity"])) for fill in agent_fills if fill["direction"] == "buy")
-        sell_qty = sum(int(num(fill["executed_quantity"])) for fill in agent_fills if fill["direction"] == "sell")
+        order_counts = Counter(row_action(order) for order in day_orders)
+        agent_fills = [fill for fill in fills_by_date.get(date, []) if row_agent_id(fill) != "INSTITUTIONAL"]
+        buy_qty = sum(int(row_quantity(fill)) for fill in agent_fills if row_action(fill) == "buy")
+        sell_qty = sum(int(row_quantity(fill)) for fill in agent_fills if row_action(fill) == "sell")
         net_qty = buy_qty - sell_qty
         if net_qty > 0:
             net_text = f"순매수 {net_qty:,}주"
@@ -462,7 +478,7 @@ def main() -> None:
         daily_table.append(
             [
                 date,
-                money(row["closing_price"]),
+                money(row_close(row)),
                 f"매수 {order_counts.get('buy', 0)} / 매도 {order_counts.get('sell', 0)}",
                 f"{int(num(row['volume'])):,}주 / {row['fill_count']}건",
                 net_text,
@@ -478,9 +494,9 @@ def main() -> None:
         rows = by_date[date]
         fills = fills_by_date.get(date, [])
         story.append(para(f"{date} / Turn {day['turn']}", styles["KHeading2"]))
-        agent_fills = [fill for fill in fills if fill["user_id"] not in {"COUNTERSIDE", "INSTITUTIONAL"}]
-        buy_qty = sum(int(num(fill["executed_quantity"])) for fill in agent_fills if fill["direction"] == "buy")
-        sell_qty = sum(int(num(fill["executed_quantity"])) for fill in agent_fills if fill["direction"] == "sell")
+        agent_fills = [fill for fill in fills if row_agent_id(fill) != "INSTITUTIONAL"]
+        buy_qty = sum(int(row_quantity(fill)) for fill in agent_fills if row_action(fill) == "buy")
+        sell_qty = sum(int(row_quantity(fill)) for fill in agent_fills if row_action(fill) == "sell")
         net_qty = buy_qty - sell_qty
         net_text = "중립"
         if net_qty > 0:
@@ -497,7 +513,7 @@ def main() -> None:
                 f"news_max_date={context_meta.get('news_max_date', date)}, "
                 f"news_end_time={context_meta.get('news_end_time') or ''}, "
                 f"execution_date={context_meta.get('execution_date', date)}. "
-                f"시장 지표: 기준 종가 {money(market.get('close'))}, 실행 종가 {money(day['closing_price'])}, 등락률 {pct(market.get('pct_chg'))}, "
+                f"시장 지표: 기준 종가 {money(market.get('close'))}, 실행 종가 {money(row_close(day))}, 등락률 {pct(market.get('pct_chg'))}, "
                 f"MA5 {money(market.get('ma5'))}, MA20 {money(market.get('ma20'))}. "
                 f"당일 주문 {day['submitted_orders']}건, 체결량 {int(num(day['volume'])):,}주, "
                 f"LLM 매수 체결 {buy_qty:,}주 / 매도 체결 {sell_qty:,}주 / {net_text}.",
@@ -532,7 +548,8 @@ def main() -> None:
                 else "보유"
             )
             if decision["action"] != "hold":
-                decision_text += f" / {decision.get('order_type')} / {money(decision.get('price'))}"
+                if decision.get("price"):
+                    decision_text += f" / {money(decision.get('price'))}"
             decision_text += f": {short(decision.get('reason'), 260)}"
             detail_data.append(
                 [
@@ -588,7 +605,7 @@ def main() -> None:
                 order_desc = f"{action} {qty:,}주@{order_price_text(decision)}"
                 if matched:
                     result = "; ".join(
-                        f"{action_ko(f['direction'])} {int(num(f['executed_quantity'])):,}주 체결@{money(f['executed_price'])}"
+                        f"{action_ko(row_action(f))} {int(row_quantity(f)):,}주 체결@{money(f['executed_price'])}"
                         for f in matched
                     )
                 else:

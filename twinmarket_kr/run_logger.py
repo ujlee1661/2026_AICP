@@ -56,8 +56,6 @@ class SimulationLogger:
             "news_sentiment",
             "action",
             "quantity",
-            "order_type",
-            "price",
             "submitted_order",
             "belief_summary",
             "view_change",
@@ -80,10 +78,8 @@ class SimulationLogger:
             "execution_date",
             "information_mode",
             "stock_code",
-            "direction",
+            "action",
             "quantity",
-            "price",
-            "order_type",
             "reason",
         ]
         self._fills_csv_fields = [
@@ -92,11 +88,11 @@ class SimulationLogger:
             "turn",
             "subturn",
             "stock_code",
-            "user_id",
-            "direction",
+            "agent_id",
+            "action",
+            "quantity",
             "executed_price",
-            "executed_quantity",
-            "fee",
+            "status",
         ]
         self._daily_csv_fields = [
             "run_id",
@@ -105,7 +101,8 @@ class SimulationLogger:
             "subturn",
             "stock_code",
             "submitted_orders",
-            "closing_price",
+            "announced_price",
+            "close_price",
             "volume",
             "fill_count",
         ]
@@ -236,8 +233,6 @@ class SimulationLogger:
                 "news_sentiment": news_interpretation.get("news_sentiment"),
                 "action": decision.get("action"),
                 "quantity": decision.get("quantity"),
-                "order_type": decision.get("order_type"),
-                "price": decision.get("price"),
                 "submitted_order": bool(order),
                 "belief_summary": belief.get("belief_summary"),
                 "view_change": belief.get("view_change"),
@@ -247,7 +242,7 @@ class SimulationLogger:
             },
         )
         if order:
-            self.log_submitted_order(order, turn=turn, date=date, order_type=str(decision.get("order_type") or ""))
+            self.log_submitted_order(order, turn=turn, date=date)
 
     def log_agent_error(self, *, agent: dict[str, Any], turn: int, date: str, error: BaseException) -> None:
         self.write_jsonl(
@@ -263,7 +258,7 @@ class SimulationLogger:
             },
         )
 
-    def log_submitted_order(self, order: dict[str, Any], *, turn: int, date: str, order_type: str) -> None:
+    def log_submitted_order(self, order: dict[str, Any], *, turn: int, date: str) -> None:
         self.append_csv(
             "submitted_orders.csv",
             self._orders_csv_fields,
@@ -282,10 +277,8 @@ class SimulationLogger:
                 "execution_date": order.get("execution_date", date),
                 "information_mode": order.get("information_mode", ""),
                 "stock_code": order.get("stock_code"),
-                "direction": order.get("direction"),
+                "action": order.get("direction") or order.get("action"),
                 "quantity": order.get("quantity"),
-                "price": order.get("price"),
-                "order_type": order_type,
                 "reason": order.get("reason"),
             },
         )
@@ -321,7 +314,8 @@ class SimulationLogger:
                     "subturn": _subturn_from_turn(turn),
                     "stock_code": stock_code,
                     "submitted_orders": len([order for order in orders if order.get("stock_code") == stock_code]),
-                    "closing_price": result.get("closing_price"),
+                    "announced_price": result.get("announced_price"),
+                    "close_price": result.get("close_price"),
                     "volume": result.get("volume"),
                     "fill_count": len(transactions),
                 },
@@ -336,11 +330,11 @@ class SimulationLogger:
                         "turn": turn,
                         "subturn": _subturn_from_turn(turn),
                         "stock_code": tx.get("stock_code", stock_code),
-                        "user_id": tx.get("user_id"),
-                        "direction": tx.get("direction"),
+                        "agent_id": tx.get("agent_id") or tx.get("user_id"),
+                        "action": tx.get("action") or tx.get("direction"),
+                        "quantity": tx.get("quantity") or tx.get("executed_quantity"),
                         "executed_price": tx.get("executed_price"),
-                        "executed_quantity": tx.get("executed_quantity"),
-                        "fee": tx.get("fee", 0.0),
+                        "status": tx.get("status", "filled"),
                     },
                 )
 

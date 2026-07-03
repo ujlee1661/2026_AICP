@@ -22,7 +22,6 @@ def collect_context(
     information_mode: str = "pre_close_cutoff",
     subturn: str = "full",
     open_price: float | None = None,
-    mid_price: float | None = None,
     previous_close: float | None = None,
     execution_reference: str | None = None,
     memory_agent: MemoryAgent,
@@ -56,20 +55,23 @@ def collect_context(
         market_features["previous_close"] = previous_close
     if open_price is not None:
         market_features["open_price"] = open_price
-    if mid_price is not None:
-        market_features["mid_price"] = mid_price
     if execution_reference:
         market_features["execution_reference"] = execution_reference
     if subturn == "am" and open_price is not None:
+        price_label = "오늘 시가"
+        announced_price = float(open_price)
         market_features["reference_price"] = open_price
         market_features["close"] = open_price
         if previous_close:
             market_features["intraday_return_from_prev_close"] = (open_price - previous_close) / previous_close
-    elif subturn == "pm" and mid_price is not None:
-        market_features["reference_price"] = mid_price
-        market_features["close"] = mid_price
+    else:
+        price_label = "오늘 종가" if subturn == "pm" else "공시가"
+        announced_price = float(market_features["close"])
+    if subturn == "pm":
+        market_features["reference_price"] = announced_price
+        market_features["close"] = announced_price
         if open_price:
-            market_features["intraday_return_from_open"] = (mid_price - open_price) / open_price
+            market_features["intraday_return_from_open"] = (announced_price - open_price) / open_price
     community_log = None
     if community_agent is not None and turn > 1:
         if config.ENABLE_COMMUNITY and news_depth >= 1:
@@ -89,6 +91,8 @@ def collect_context(
         "execution_date": exec_date,
         "information_mode": information_mode,
         "subturn": subturn,
+        "price_label": price_label,
+        "announced_price": announced_price,
         "previous_belief": previous_belief,
         "action_reason": action_reason,
         "portfolio_summary": portfolio_summary,
@@ -104,23 +108,13 @@ def _format_order_history(raw_history: list[dict[str, Any]]) -> str:
         return "이전 주문 이력 없음"
     lines = []
     for item in raw_history:
-        submitted = item.get("submitted_price")
-        actual_close = item.get("actual_close")
         executed = item.get("executed_price")
-        submitted_text = f"{float(submitted):,.0f}원" if submitted else "N/A"
-        close_text = f"{float(actual_close):,.0f}원" if actual_close else "N/A"
         if item.get("filled"):
             exec_text = f"{float(executed):,.0f}원" if executed else "체결"
             lines.append(
-                f"{item['date']} turn {item['turn']}: {item['action']} {submitted_text} 제출 -> "
-                f"체결 (당일 종가 {close_text}, 체결가 {exec_text})"
-            )
-        elif submitted and actual_close:
-            deviation = (float(submitted) - float(actual_close)) / float(actual_close) * 100
-            lines.append(
-                f"{item['date']} turn {item['turn']}: {item['action']} {submitted_text} 제출 -> "
-                f"미체결 (당일 종가 {close_text}, 편차 {deviation:+.1f}%)"
+                f"{item['date']} turn {item['turn']}: {item['action']} "
+                f"{int(item.get('filled_quantity') or 0):,}주 체결@{exec_text}"
             )
         else:
-            lines.append(f"{item['date']} turn {item['turn']}: {item['action']} {submitted_text} 제출 -> 미체결")
+            lines.append(f"{item['date']} turn {item['turn']}: {item['action']} 주문 검증/체결 실패")
     return "\n".join(lines)

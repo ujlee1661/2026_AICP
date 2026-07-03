@@ -8,7 +8,7 @@ from typing import Any
 
 import config
 from twinmarket_kr.agents.exchange_agent import ExchangeAgent
-from twinmarket_kr.agents.fundamental_agent import FundamentalAgent, load_4h_data_csv
+from twinmarket_kr.agents.fundamental_agent import FundamentalAgent
 from twinmarket_kr.agents.memory_agent import MemoryAgent, load_agents_from_sys100
 from twinmarket_kr.agents.news_agent import NewsAgent
 from twinmarket_kr.community.agent import CommunityAgent
@@ -113,7 +113,7 @@ async def run_simulation(
     fundamental = FundamentalAgent(config.SIM_DB)
     news = NewsAgent()
     exchange = ExchangeAgent(config.SIM_DB)
-    intraday_prices = _load_intraday_prices(fundamental, dates)
+    execution_prices = _load_execution_prices(fundamental, dates)
     community = CommunityAgent(config.SIM_DB) if config.ENABLE_COMMUNITY else None
     client = OpenRouterClient()
     semaphore = asyncio.Semaphore(concurrency)
@@ -134,11 +134,11 @@ async def run_simulation(
                 "end_date": end_date,
                 "information_mode": information_mode,
                 "decision_space": decision_space,
-                "limit_only_orders": True,
+                "limit_only_orders": False,
+                "exchange_mode": "announced_price_binary",
                 "balanced_depths": balanced_depths,
                 "agent_ids": [agent["agent_id"] for agent in agents],
                 "agent_depths": {agent["agent_id"]: int(agent.get("news_depth") or 0) for agent in agents},
-                "intraday_price_csv": str(config.STOCK_DATA_CSV),
                 "subturns": ["am", "pm"],
             }
         )
@@ -157,7 +157,6 @@ async def run_simulation(
         news_end_time: str | None,
         subturn: str,
         open_price: float,
-        mid_price: float | None,
         previous_close: float,
         execution_reference: str,
     ) -> dict[str, Any] | None:
@@ -176,7 +175,6 @@ async def run_simulation(
                     information_mode=information_mode,
                     subturn=subturn,
                     open_price=open_price,
-                    mid_price=mid_price,
                     previous_close=previous_close,
                     execution_reference=execution_reference,
                     decision_space=decision_space,
@@ -200,7 +198,7 @@ async def run_simulation(
             if previous_execution_date
             else fundamental.get_market_features(day)["close"]
         )
-        prices = intraday_prices[day]
+        prices = execution_prices[day]
         if information_mode == "prior_close":
             am_news_max_date = previous_by_date[day]
             pm_news_max_date = previous_by_date[day]
@@ -219,18 +217,18 @@ async def run_simulation(
             exchange=exchange,
             memory=memory,
             logger=logger,
-            target_price=prices["mid"],
+            announced_price=prices["open"],
+            close_price=prices["close"],
             last_price=previous_close,
-            current_price=prices["mid"],
+            current_price=prices["open"],
             market_features_date=previous_by_date[day] if information_mode != "same_day" else day,
             news_max_date=am_news_max_date,
             news_start_date=previous_by_date[day] if information_mode == "pre_close_cutoff" else None,
             news_start_time=config.MARKET_CLOSE_TIME if information_mode == "pre_close_cutoff" else None,
             news_end_time="08:59" if information_mode == "pre_close_cutoff" else None,
             open_price=prices["open"],
-            mid_price=None,
             previous_close=previous_close,
-            execution_reference="13:00 price",
+            execution_reference="open price",
         )
 
         pm_turn = am_turn + 1
@@ -244,7 +242,8 @@ async def run_simulation(
             exchange=exchange,
             memory=memory,
             logger=logger,
-            target_price=prices["close"],
+            announced_price=prices["close"],
+            close_price=prices["close"],
             last_price=previous_close,
             current_price=prices["close"],
             market_features_date=day,
@@ -253,7 +252,6 @@ async def run_simulation(
             news_start_time="08:59" if information_mode == "pre_close_cutoff" else None,
             news_end_time=config.MARKET_CLOSE_TIME if information_mode == "pre_close_cutoff" else None,
             open_price=prices["open"],
-            mid_price=prices["mid"],
             previous_close=previous_close,
             execution_reference="close price",
         )
@@ -300,25 +298,14 @@ async def run_simulation(
         print(f"log_dir={logger.run_dir}")
 
 
-def _load_intraday_prices(fundamental: FundamentalAgent, dates: list[str]) -> dict[str, dict[str, float]]:
-    raw_4h = load_4h_data_csv(config.STOCK_DATA_CSV)
+def _load_execution_prices(fundamental: FundamentalAgent, dates: list[str]) -> dict[str, dict[str, float]]:
     prices: dict[str, dict[str, float]] = {}
-    missing_mid = []
     for day in dates:
         daily = fundamental.get_daily_prices(day)
-        intraday = raw_4h.get(day, {})
-        mid = intraday.get("mid")
-        if mid is None:
-            missing_mid.append(day)
-            continue
         prices[day] = {
-            "open": float(intraday.get("open", daily["open"])),
-            "mid": float(mid),
-            "close": float(intraday.get("close", daily["close"])),
+            "open": float(daily["open"]),
+            "close": float(daily["close"]),
         }
-    if missing_mid:
-        sample = ", ".join(missing_mid[:5])
-        raise RuntimeError(f"13:00 prices missing in {config.STOCK_DATA_CSV}: {sample}")
     return prices
 
 
@@ -333,7 +320,8 @@ async def _run_subturn(
     exchange: ExchangeAgent,
     memory: MemoryAgent,
     logger: SimulationLogger | None,
-    target_price: float,
+    announced_price: float,
+    close_price: float,
     last_price: float,
     current_price: float,
     market_features_date: str,
@@ -342,7 +330,6 @@ async def _run_subturn(
     news_start_time: str | None,
     news_end_time: str | None,
     open_price: float,
-    mid_price: float | None,
     previous_close: float,
     execution_reference: str,
 ) -> dict[str, Any]:
@@ -361,7 +348,6 @@ async def _run_subturn(
                     news_end_time,
                     subturn,
                     open_price,
-                    mid_price,
                     previous_close,
                     execution_reference,
                 )
@@ -371,13 +357,17 @@ async def _run_subturn(
         if result is not None
     ]
     orders = [result["order"] for result in turn_results if result.get("order") is not None]
+    portfolio_snapshots = _portfolio_snapshots(memory, agents, turn - 1)
     results = exchange.process_daily_orders(
         orders,
-        {config.STOCK_CODE: float(target_price)},
+        {config.STOCK_CODE: float(announced_price)},
         {config.STOCK_CODE: float(last_price)},
         current_date=day,
         day_number=day_index,
+        portfolios=portfolio_snapshots,
     )
+    for result in results.values():
+        result["close_price"] = float(close_price)
     if logger is not None:
         logger.log_daily_exchange(date=day, turn=turn, orders=orders, results=results)
     execution_by_agent = _update_portfolios_from_results(
@@ -396,6 +386,25 @@ async def _run_subturn(
         "order_count": len(orders),
         "volume": results[config.STOCK_CODE]["volume"],
     }
+
+
+def _portfolio_snapshots(memory: MemoryAgent, agents: list[dict[str, Any]], turn: int) -> dict[str, dict[str, Any]]:
+    snapshots: dict[str, dict[str, Any]] = {}
+    for agent in agents:
+        agent_id = str(agent["agent_id"])
+        row = memory._latest_portfolio(agent_id, before_or_at_turn=turn)
+        if row is None:
+            raise ValueError(f"portfolio not found for {agent_id} at turn {turn}")
+        position = 0
+        for pos in json.loads(row["positions"]):
+            if pos.get("stock_code") == config.STOCK_CODE:
+                position = int(pos.get("quantity", 0))
+                break
+        snapshots[agent_id] = {
+            "cash": float(row["cash"]),
+            "position": position,
+        }
+    return snapshots
 
 
 def _ensure_depth2_agent(agents: list[dict[str, Any]], all_agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -461,19 +470,19 @@ def _update_portfolios_from_results(
     fills_by_agent: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for stock_code, result in results.items():
         for tx in result.get("transactions") or []:
-            user_id = str(tx.get("user_id") or "")
-            if not user_id or user_id == config.COUNTERSIDE_USER_ID:
+            user_id = str(tx.get("agent_id") or tx.get("user_id") or "")
+            if not user_id:
                 continue
-            quantity = int(tx.get("executed_quantity", 0))
+            quantity = int(tx.get("quantity") or tx.get("executed_quantity", 0))
             price = float(tx.get("executed_price", 0))
             fills_by_agent[user_id].append(
                 {
                     "user_id": user_id,
                     "stock_code": tx.get("stock_code", stock_code),
-                    "direction": tx.get("direction"),
+                    "direction": tx.get("action") or tx.get("direction"),
                     "quantity": quantity,
                     "price": price,
-                    "fee": float(tx.get("fee", price * quantity * config.COMMISSION_RATE)),
+                    "fee": 0.0,
                 }
             )
     submitted_agent_ids = {str(order.get("user_id")) for order in orders if order.get("user_id")}

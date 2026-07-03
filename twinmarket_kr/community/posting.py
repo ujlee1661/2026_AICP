@@ -34,10 +34,9 @@ async def posting_decision(
     execution_summary = execution_summary or {}
     trade_summary = (
         f"오늘 주문: {decision.get('action', 'hold')} {decision.get('quantity', 0)}주, "
-        f"주문가: {decision.get('price', '')}, "
+        f"공시가: {decision.get('price', '')}, "
         f"체결수량: {execution_summary.get('filled_quantity', 0)}주, "
         f"체결평균가: {execution_summary.get('executed_price') or '미체결'}, "
-        f"수수료: {execution_summary.get('fee', 0)}, "
         f"이유: {str(decision.get('reason', ''))[:200]}"
     )
     prompt = prompt_template.format(

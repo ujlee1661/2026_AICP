@@ -54,37 +54,30 @@ def _returns_for_volatility(closes: list[float], index: int, window: int = 20) -
     return stdev(returns)
 
 
-def load_4h_data_csv(csv_path: Path | str = config.STOCK_DATA_CSV) -> dict[str, dict[str, float]]:
-    """Load intraday reference prices.
-
-    Preferred project format is stock_data.csv with a price_13 column.
-    The older date,time_slot,price helper format is still accepted.
-    """
+def load_daily_price_csv(csv_path: Path | str = config.STOCK_DATA_CSV) -> dict[str, dict[str, float]]:
+    """Load date -> {"open": price, "close": price} reference prices."""
     path = Path(csv_path)
     if not path.exists():
-        raise FileNotFoundError(f"4h stock data csv not found: {path}")
+        raise FileNotFoundError(f"daily stock data csv not found: {path}")
     result: dict[str, dict[str, float]] = {}
     with path.open(encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
-        columns = set(reader.fieldnames or [])
+        columns = reader.fieldnames or []
+        date_col = _pick(columns, DATE_CANDIDATES, required=True)
+        open_col = _pick(columns, OPEN_CANDIDATES)
+        close_col = _pick(columns, CLOSE_CANDIDATES, required=True)
         for row in reader:
-            day = str(row.get("date") or "").strip()
+            day = str(row.get(date_col) or "").strip()
             if not day:
                 continue
-            result.setdefault(day, {})
-            if {"time_slot", "price"} <= columns:
-                slot = str(row.get("time_slot") or "").strip().lower()
-                price = _to_float(row.get("price"))
-            elif "price_13" in columns:
-                slot = "mid"
-                price = _to_float(row.get("price_13"))
-            else:
-                raise ValueError(
-                    "intraday price data must contain either date,time_slot,price "
-                    "or stock_data.csv-style date,price_13 columns"
-                )
-            if slot and price is not None:
-                result[day][slot] = float(price)
+            close = _to_float(row.get(close_col))
+            if close is None:
+                continue
+            open_price = _to_float(row.get(open_col)) if open_col else close
+            result[day] = {
+                "open": float(open_price if open_price is not None else close),
+                "close": float(close),
+            }
     return result
 
 

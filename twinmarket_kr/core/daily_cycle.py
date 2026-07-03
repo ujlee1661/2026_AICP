@@ -42,7 +42,6 @@ async def run_agent_turn(
     information_mode: str = "pre_close_cutoff",
     subturn: str = "full",
     open_price: float | None = None,
-    mid_price: float | None = None,
     previous_close: float | None = None,
     execution_reference: str | None = None,
     decision_space: str = "buy_sell_only",
@@ -67,7 +66,6 @@ async def run_agent_turn(
         information_mode=information_mode,
         subturn=subturn,
         open_price=open_price,
-        mid_price=mid_price,
         previous_close=previous_close,
         execution_reference=execution_reference,
         memory_agent=memory_agent,
@@ -163,12 +161,13 @@ async def run_agent_turn(
             memory_agent.save_belief(today_belief)
     else:
         memory_agent.save_belief(today_belief)
-    current_price = float(today_context["market_features"]["close"])
+    current_price = float(today_context.get("announced_price") or today_context["market_features"]["close"])
     available_cash, current_quantity = _portfolio_numbers(memory_agent, agent["agent_id"], turn - 1)
     constraints = build_trading_constraints(
         available_cash=available_cash,
         current_quantity=current_quantity,
         current_price=current_price,
+        price_label=str(today_context.get("price_label") or "공시가"),
         allow_hold=decision_space != "buy_sell_only",
     )
     market_analysis = await analyze_market(
@@ -199,8 +198,8 @@ async def run_agent_turn(
         "fee": 0,
         "action_reason": decision["reason"],
         "risk_control": decision["risk_control"],
-        "order_type": decision["order_type"],
-        "submitted_price": decision["price"],
+        "order_type": "announced_price",
+        "submitted_price": None,
         "status": "pending" if decision["action"] != "hold" and decision["quantity"] > 0 else "not_submitted",
         "filled_quantity": 0,
     }
@@ -216,7 +215,8 @@ async def run_agent_turn(
             "user_id": agent["agent_id"],
             "direction": decision["action"],
             "quantity": decision["quantity"],
-            "price": decision["price"],
+            "price": current_price,
+            "announced_price": current_price,
             "timestamp": float(turn),
             "reason": decision["reason"],
             "decision_date": today_context["decision_date"],

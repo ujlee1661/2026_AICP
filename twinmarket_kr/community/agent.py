@@ -76,8 +76,8 @@ class CommunityAgent:
         with connect(self._db) as conn:
             rows = conn.execute(
                 """
-                SELECT turn, date, action, stock_code, quantity, submitted_price,
-                       executed_price, trade_value, fee, status, filled_quantity,
+                SELECT turn, date, action, stock_code, quantity,
+                       executed_price, trade_value, status, filled_quantity,
                        action_reason
                 FROM trade_log
                 WHERE agent_id = ?

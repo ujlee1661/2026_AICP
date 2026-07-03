@@ -116,7 +116,6 @@ class MemoryAgent:
             direction = fill["direction"]
             quantity = int(fill["quantity"])
             price = float(fill["price"])
-            fee = float(fill.get("fee", 0.0))
             pos = positions.setdefault(
                 stock_code,
                 {
@@ -133,12 +132,12 @@ class MemoryAgent:
                 new_qty = pos["quantity"] + quantity
                 pos["quantity"] = new_qty
                 pos["avg_cost"] = total_cost / new_qty if new_qty else 0.0
-                cash -= price * quantity + fee
+                cash -= price * quantity
             elif direction == "sell":
                 sell_qty = min(quantity, pos["quantity"])
-                realized_pnl += (price - pos["avg_cost"]) * sell_qty - fee
+                realized_pnl += (price - pos["avg_cost"]) * sell_qty
                 pos["quantity"] -= sell_qty
-                cash += price * sell_qty - fee
+                cash += price * sell_qty
                 if pos["quantity"] <= 0:
                     positions.pop(stock_code, None)
             else:
@@ -275,7 +274,6 @@ class MemoryAgent:
                     tl.date,
                     tl.turn,
                     tl.action,
-                    tl.submitted_price,
                     tl.status,
                     tl.executed_price,
                     tl.filled_quantity,
@@ -302,7 +300,6 @@ class MemoryAgent:
                     "date": row["date"],
                     "turn": row["turn"],
                     "action": row["action"],
-                    "submitted_price": row["submitted_price"],
                     "filled": filled,
                     "status": row["status"],
                     "executed_price": row["executed_price"] if filled else None,
@@ -316,7 +313,7 @@ class MemoryAgent:
         with connect(self.db_path) as conn:
             row = conn.execute(
                 """
-                SELECT action, quantity, submitted_price, status, filled_quantity,
+                SELECT action, quantity, status, filled_quantity,
                        executed_price, action_reason
                 FROM trade_log
                 WHERE agent_id = ? AND action IN ('buy', 'sell')
@@ -328,8 +325,6 @@ class MemoryAgent:
             ).fetchone()
         if row is None:
             return None
-        submitted = row["submitted_price"]
-        submitted_text = "" if submitted is None else f", 제출가 {float(submitted):,.0f}원"
         if row["status"] == "filled":
             result = f"체결 {int(row['filled_quantity']):,}주"
             if row["executed_price"] is not None:
@@ -339,7 +334,7 @@ class MemoryAgent:
         else:
             result = "체결 결과 대기"
         return (
-            f"이전 주문: {row['action']} {int(row['quantity']):,}주{submitted_text}. "
+            f"이전 주문: {row['action']} {int(row['quantity']):,}주. "
             f"체결 결과: {result}. 사유: {row['action_reason']}"
         )
 
