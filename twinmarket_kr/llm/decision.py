@@ -137,6 +137,7 @@ async def make_decision(
     today_belief: dict[str, Any],
     market_analysis: dict[str, Any],
     portfolio_summary: str,
+    order_history: str,
     trading_constraints: dict[str, Any],
     *,
     allow_hold: bool = False,
@@ -153,6 +154,7 @@ async def make_decision(
         today_belief=json.dumps(today_belief, ensure_ascii=False, indent=2),
         market_analysis=json.dumps(market_analysis, ensure_ascii=False, indent=2),
         portfolio_summary=portfolio_summary,
+        order_history=order_history,
         trading_constraints=json.dumps(trading_constraints, ensure_ascii=False, indent=2),
         decision_space_instruction=decision_space_instruction,
     )

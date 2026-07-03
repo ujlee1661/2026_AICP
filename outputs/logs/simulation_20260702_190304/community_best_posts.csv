@@ -1,0 +1,5 @@
+﻿run_id,date,turn,rank,post_id,title,post_type,score
+simulation_20260702_190304,2026-02-27,2,1,1872,오늘 삼성전자 1주 매수했습니다!,trade_share,3
+simulation_20260702_190304,2026-02-27,2,2,1871,오늘 삼성전자 1주 매수했습니다!,trade_share,0
+simulation_20260702_190304,2026-02-27,2,3,1869,오늘 삼성전자 추가 매수했습니다!,trade_share,-3
+simulation_20260702_190304,2026-02-27,2,4,1870,오늘 삼성전자 매수했습니다!,trade_share,-3

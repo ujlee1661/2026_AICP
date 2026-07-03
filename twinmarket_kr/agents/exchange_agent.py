@@ -127,14 +127,16 @@ class ExchangeAgent:
         for order in sorted(normalized_buys, key=lambda item: (-item.price, item.timestamp)):
             if order.price >= target_price and remaining > 0:
                 qty = min(order.quantity, remaining)
-                transactions.append(_transaction(order, target_price, qty))
+                exec_price = target_price if order.user_id == config.COUNTERSIDE_USER_ID else order.price
+                transactions.append(_transaction(order, exec_price, qty))
                 remaining -= qty
 
         remaining = matched_volume
         for order in sorted(normalized_sells, key=lambda item: (item.price, item.timestamp)):
             if order.price <= target_price and remaining > 0:
                 qty = min(order.quantity, remaining)
-                transactions.append(_transaction(order, target_price, qty))
+                exec_price = target_price if order.user_id == config.COUNTERSIDE_USER_ID else order.price
+                transactions.append(_transaction(order, exec_price, qty))
                 remaining -= qty
 
         return target_price, matched_volume, transactions

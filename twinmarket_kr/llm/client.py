@@ -24,6 +24,7 @@ class OpenRouterClient:
         self.base_url = base_url or config.OPENROUTER_BASE_URL
         self.model = model or config.OPENROUTER_MODEL
         self.max_retries = max_retries
+        self.timeout = timeout
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY is not set.")
         if AsyncOpenAI is None:
@@ -56,7 +57,10 @@ class OpenRouterClient:
         last_error: Exception | None = None
         for _ in range(self.max_retries):
             try:
-                return await self.client.chat.completions.create(**kwargs)
+                return await asyncio.wait_for(
+                    self.client.chat.completions.create(**kwargs),
+                    timeout=self.timeout + 5,
+                )
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
                 await asyncio.sleep(delay)

@@ -261,6 +261,57 @@ class MemoryAgent:
             )
             conn.commit()
 
+    def get_recent_order_history(
+        self,
+        agent_id: str,
+        last_n: int = 5,
+        *,
+        current_date: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with connect(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    tl.date,
+                    tl.turn,
+                    tl.action,
+                    tl.submitted_price,
+                    tl.status,
+                    tl.executed_price,
+                    tl.filled_quantity,
+                    sd.close_price AS actual_close
+                FROM trade_log tl
+                LEFT JOIN StockData sd
+                  ON sd.date = tl.date AND sd.stock_id = tl.stock_code
+                WHERE tl.agent_id = ?
+                  AND tl.action IN ('buy', 'sell')
+                ORDER BY tl.turn DESC
+                LIMIT ?
+                """,
+                (agent_id, int(last_n)),
+            ).fetchall()
+        history = []
+        for row in rows:
+            filled_qty = int(row["filled_quantity"] or 0)
+            filled = str(row["status"]) == "filled" and filled_qty > 0
+            actual_close = row["actual_close"]
+            if current_date is not None and str(row["date"]) >= current_date:
+                actual_close = None
+            history.append(
+                {
+                    "date": row["date"],
+                    "turn": row["turn"],
+                    "action": row["action"],
+                    "submitted_price": row["submitted_price"],
+                    "filled": filled,
+                    "status": row["status"],
+                    "executed_price": row["executed_price"] if filled else None,
+                    "filled_quantity": filled_qty,
+                    "actual_close": actual_close,
+                }
+            )
+        return history
+
     def get_last_action_reason(self, agent_id: str) -> str | None:
         with connect(self.db_path) as conn:
             row = conn.execute(

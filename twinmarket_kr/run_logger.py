@@ -36,6 +36,7 @@ class SimulationLogger:
             "run_id",
             "date",
             "turn",
+            "subturn",
             "agent_id",
             "decision_date",
             "market_features_date",
@@ -68,6 +69,7 @@ class SimulationLogger:
             "run_id",
             "date",
             "turn",
+            "subturn",
             "agent_id",
             "decision_date",
             "market_features_date",
@@ -88,6 +90,7 @@ class SimulationLogger:
             "run_id",
             "date",
             "turn",
+            "subturn",
             "stock_code",
             "user_id",
             "direction",
@@ -99,6 +102,7 @@ class SimulationLogger:
             "run_id",
             "date",
             "turn",
+            "subturn",
             "stock_code",
             "submitted_orders",
             "closing_price",
@@ -212,6 +216,7 @@ class SimulationLogger:
                 "run_id": self.run_id,
                 "date": date,
                 "turn": turn,
+                "subturn": context.get("subturn", "full"),
                 "agent_id": agent.get("agent_id"),
                 "decision_date": context.get("decision_date", date),
                 "market_features_date": context.get("market_features_date", date),
@@ -266,6 +271,7 @@ class SimulationLogger:
                 "run_id": self.run_id,
                 "date": date,
                 "turn": turn,
+                "subturn": order.get("subturn", ""),
                 "agent_id": order.get("user_id"),
                 "decision_date": order.get("decision_date", date),
                 "market_features_date": order.get("market_features_date", date),
@@ -312,6 +318,7 @@ class SimulationLogger:
                     "run_id": self.run_id,
                     "date": date,
                     "turn": turn,
+                    "subturn": _subturn_from_turn(turn),
                     "stock_code": stock_code,
                     "submitted_orders": len([order for order in orders if order.get("stock_code") == stock_code]),
                     "closing_price": result.get("closing_price"),
@@ -327,6 +334,7 @@ class SimulationLogger:
                         "run_id": self.run_id,
                         "date": date,
                         "turn": turn,
+                        "subturn": _subturn_from_turn(turn),
                         "stock_code": tx.get("stock_code", stock_code),
                         "user_id": tx.get("user_id"),
                         "direction": tx.get("direction"),
@@ -578,3 +586,9 @@ class SimulationLogger:
             "segment_key",
         ]
         return {key: agent.get(key) for key in keys}
+
+
+def _subturn_from_turn(turn: int) -> str:
+    if turn <= 0:
+        return "full"
+    return "am" if turn % 2 == 1 else "pm"

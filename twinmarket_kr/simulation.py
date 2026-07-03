@@ -8,7 +8,7 @@ from typing import Any
 
 import config
 from twinmarket_kr.agents.exchange_agent import ExchangeAgent
-from twinmarket_kr.agents.fundamental_agent import FundamentalAgent
+from twinmarket_kr.agents.fundamental_agent import FundamentalAgent, load_4h_data_csv
 from twinmarket_kr.agents.memory_agent import MemoryAgent, load_agents_from_sys100
 from twinmarket_kr.agents.news_agent import NewsAgent
 from twinmarket_kr.community.agent import CommunityAgent
@@ -113,6 +113,7 @@ async def run_simulation(
     fundamental = FundamentalAgent(config.SIM_DB)
     news = NewsAgent()
     exchange = ExchangeAgent(config.SIM_DB)
+    intraday_prices = _load_intraday_prices(fundamental, dates)
     community = CommunityAgent(config.SIM_DB) if config.ENABLE_COMMUNITY else None
     client = OpenRouterClient()
     semaphore = asyncio.Semaphore(concurrency)
@@ -125,6 +126,7 @@ async def run_simulation(
                 "concurrency": concurrency,
                 "agent_count": len(agents),
                 "date_count": len(dates),
+                "turn_count": len(dates) * 2,
                 "sim_db": str(config.SIM_DB),
                 "random_agents": random_agents,
                 "random_seed": random_seed,
@@ -136,6 +138,8 @@ async def run_simulation(
                 "balanced_depths": balanced_depths,
                 "agent_ids": [agent["agent_id"] for agent in agents],
                 "agent_depths": {agent["agent_id"]: int(agent.get("news_depth") or 0) for agent in agents},
+                "intraday_price_csv": str(config.STOCK_DATA_CSV),
+                "subturns": ["am", "pm"],
             }
         )
         if enable_logs
@@ -151,6 +155,11 @@ async def run_simulation(
         news_start_date: str | None,
         news_start_time: str | None,
         news_end_time: str | None,
+        subturn: str,
+        open_price: float,
+        mid_price: float | None,
+        previous_close: float,
+        execution_reference: str,
     ) -> dict[str, Any] | None:
         async with semaphore:
             try:
@@ -165,6 +174,11 @@ async def run_simulation(
                     news_end_time=news_end_time,
                     execution_date=day,
                     information_mode=information_mode,
+                    subturn=subturn,
+                    open_price=open_price,
+                    mid_price=mid_price,
+                    previous_close=previous_close,
+                    execution_reference=execution_reference,
                     decision_space=decision_space,
                     memory_agent=memory,
                     fundamental_agent=fundamental,
@@ -179,74 +193,77 @@ async def run_simulation(
                     logger.log_agent_error(agent=agent, turn=turn, date=day, error=exc)
                 raise
 
-    for index, day in enumerate(dates, start=1):
-        news_start_date = None
-        news_start_time = None
-        news_end_time = None
-        if information_mode == "pre_close_cutoff":
-            market_features_date = previous_by_date[day]
-            news_start_date = previous_by_date[day]
-            news_start_time = config.MARKET_CLOSE_TIME
-            news_max_date = day
-            news_end_time = config.ORDER_CUTOFF_TIME
-        elif information_mode == "prior_close":
-            market_features_date = previous_by_date[day]
-            news_max_date = previous_by_date[day]
-        else:
-            market_features_date = day
-            news_max_date = day
-        turn_results = [
-            result
-            for result in await asyncio.gather(
-                *(
-                    guarded_turn(
-                        agent,
-                        index,
-                        day,
-                        market_features_date,
-                        news_max_date,
-                        news_start_date,
-                        news_start_time,
-                        news_end_time,
-                    )
-                    for agent in agents
-                )
-            )
-            if result is not None
-        ]
-        orders = [result["order"] for result in turn_results if result.get("order") is not None]
-        real_price = fundamental.get_market_features(day)["close"]
+    for day_index, day in enumerate(dates, start=1):
         previous_execution_date = previous_by_date.get(day)
-        last_price = (
-            real_price
-            if previous_execution_date is None
-            else fundamental.get_market_features(previous_execution_date)["close"]
+        previous_close = (
+            fundamental.get_market_features(previous_execution_date)["close"]
+            if previous_execution_date
+            else fundamental.get_market_features(day)["close"]
         )
-        results = exchange.process_daily_orders(
-            orders,
-            {config.STOCK_CODE: real_price},
-            {config.STOCK_CODE: last_price},
-            current_date=day,
-            day_number=index,
-        )
-        if logger is not None:
-            logger.log_daily_exchange(date=day, turn=index, orders=orders, results=results)
-        execution_by_agent = _update_portfolios_from_results(
-            memory=memory,
+        prices = intraday_prices[day]
+        if information_mode == "prior_close":
+            am_news_max_date = previous_by_date[day]
+            pm_news_max_date = previous_by_date[day]
+        else:
+            am_news_max_date = day
+            pm_news_max_date = day
+
+        am_turn = (day_index - 1) * 2 + 1
+        am_results = await _run_subturn(
+            subturn="am",
+            turn=am_turn,
+            day_index=day_index,
+            day=day,
             agents=agents,
-            turn=index,
-            date=day,
-            orders=orders,
-            results=results,
-            current_prices={config.STOCK_CODE: real_price},
+            guarded_turn=guarded_turn,
+            exchange=exchange,
+            memory=memory,
             logger=logger,
+            target_price=prices["mid"],
+            last_price=previous_close,
+            current_price=prices["mid"],
+            market_features_date=previous_by_date[day] if information_mode != "same_day" else day,
+            news_max_date=am_news_max_date,
+            news_start_date=previous_by_date[day] if information_mode == "pre_close_cutoff" else None,
+            news_start_time=config.MARKET_CLOSE_TIME if information_mode == "pre_close_cutoff" else None,
+            news_end_time="08:59" if information_mode == "pre_close_cutoff" else None,
+            open_price=prices["open"],
+            mid_price=None,
+            previous_close=previous_close,
+            execution_reference="13:00 price",
         )
+
+        pm_turn = am_turn + 1
+        pm_results = await _run_subturn(
+            subturn="pm",
+            turn=pm_turn,
+            day_index=day_index,
+            day=day,
+            agents=agents,
+            guarded_turn=guarded_turn,
+            exchange=exchange,
+            memory=memory,
+            logger=logger,
+            target_price=prices["close"],
+            last_price=previous_close,
+            current_price=prices["close"],
+            market_features_date=day,
+            news_max_date=pm_news_max_date,
+            news_start_date=day if information_mode == "pre_close_cutoff" else None,
+            news_start_time="08:59" if information_mode == "pre_close_cutoff" else None,
+            news_end_time=config.MARKET_CLOSE_TIME if information_mode == "pre_close_cutoff" else None,
+            open_price=prices["open"],
+            mid_price=prices["mid"],
+            previous_close=previous_close,
+            execution_reference="close price",
+        )
+
         if config.ENABLE_COMMUNITY and config.ENABLE_COMMUNITY_POSTING and community is not None:
             await post_trade_posting_phase(
-                turn_results=turn_results,
+                turn_results=pm_results["turn_results"],
                 community_agent=community,
-                execution_by_agent=execution_by_agent,
-                turn=index,
+                execution_by_agent=pm_results["execution_by_agent"],
+                turn=pm_turn,
                 date=day,
                 client=client,
                 concurrency=concurrency,
@@ -257,13 +274,17 @@ async def run_simulation(
                 agents=agents,
                 community_agent=community,
                 memory_agent=memory,
-                turn=index,
+                turn=pm_turn,
                 date=day,
                 client=client,
                 concurrency=concurrency,
                 event_logger=logger,
             )
-        print(f"{day} turn={index} orders={len(orders)} volume={results[config.STOCK_CODE]['volume']}")
+        print(
+            f"{day} turns={am_turn}/{pm_turn} "
+            f"am_orders={am_results['order_count']} am_volume={am_results['volume']} "
+            f"pm_orders={pm_results['order_count']} pm_volume={pm_results['volume']}"
+        )
     if logger is not None:
         logger.write_json(
             "run_complete.json",
@@ -277,6 +298,104 @@ async def run_simulation(
             },
         )
         print(f"log_dir={logger.run_dir}")
+
+
+def _load_intraday_prices(fundamental: FundamentalAgent, dates: list[str]) -> dict[str, dict[str, float]]:
+    raw_4h = load_4h_data_csv(config.STOCK_DATA_CSV)
+    prices: dict[str, dict[str, float]] = {}
+    missing_mid = []
+    for day in dates:
+        daily = fundamental.get_daily_prices(day)
+        intraday = raw_4h.get(day, {})
+        mid = intraday.get("mid")
+        if mid is None:
+            missing_mid.append(day)
+            continue
+        prices[day] = {
+            "open": float(intraday.get("open", daily["open"])),
+            "mid": float(mid),
+            "close": float(intraday.get("close", daily["close"])),
+        }
+    if missing_mid:
+        sample = ", ".join(missing_mid[:5])
+        raise RuntimeError(f"13:00 prices missing in {config.STOCK_DATA_CSV}: {sample}")
+    return prices
+
+
+async def _run_subturn(
+    *,
+    subturn: str,
+    turn: int,
+    day_index: int,
+    day: str,
+    agents: list[dict[str, Any]],
+    guarded_turn: Any,
+    exchange: ExchangeAgent,
+    memory: MemoryAgent,
+    logger: SimulationLogger | None,
+    target_price: float,
+    last_price: float,
+    current_price: float,
+    market_features_date: str,
+    news_max_date: str,
+    news_start_date: str | None,
+    news_start_time: str | None,
+    news_end_time: str | None,
+    open_price: float,
+    mid_price: float | None,
+    previous_close: float,
+    execution_reference: str,
+) -> dict[str, Any]:
+    turn_results = [
+        result
+        for result in await asyncio.gather(
+            *(
+                guarded_turn(
+                    agent,
+                    turn,
+                    day,
+                    market_features_date,
+                    news_max_date,
+                    news_start_date,
+                    news_start_time,
+                    news_end_time,
+                    subturn,
+                    open_price,
+                    mid_price,
+                    previous_close,
+                    execution_reference,
+                )
+                for agent in agents
+            )
+        )
+        if result is not None
+    ]
+    orders = [result["order"] for result in turn_results if result.get("order") is not None]
+    results = exchange.process_daily_orders(
+        orders,
+        {config.STOCK_CODE: float(target_price)},
+        {config.STOCK_CODE: float(last_price)},
+        current_date=day,
+        day_number=day_index,
+    )
+    if logger is not None:
+        logger.log_daily_exchange(date=day, turn=turn, orders=orders, results=results)
+    execution_by_agent = _update_portfolios_from_results(
+        memory=memory,
+        agents=agents,
+        turn=turn,
+        date=day,
+        orders=orders,
+        results=results,
+        current_prices={config.STOCK_CODE: float(current_price)},
+        logger=logger,
+    )
+    return {
+        "turn_results": turn_results,
+        "execution_by_agent": execution_by_agent,
+        "order_count": len(orders),
+        "volume": results[config.STOCK_CODE]["volume"],
+    }
 
 
 def _ensure_depth2_agent(agents: list[dict[str, Any]], all_agents: list[dict[str, Any]]) -> list[dict[str, Any]]:

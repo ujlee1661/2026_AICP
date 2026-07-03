@@ -1,0 +1,48 @@
+{
+  "run_id": "simulation_20260702_181114",
+  "created_at": "20260702_181114",
+  "max_agents": 10,
+  "max_days": null,
+  "concurrency": 2,
+  "agent_count": 10,
+  "date_count": 1,
+  "turn_count": 2,
+  "sim_db": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/outputs/sim.db",
+  "random_agents": false,
+  "random_seed": 2,
+  "start_date": "2026-02-27",
+  "end_date": "2026-02-27",
+  "information_mode": "pre_close_cutoff",
+  "decision_space": "buy_sell_only",
+  "limit_only_orders": true,
+  "balanced_depths": true,
+  "agent_ids": [
+    "A009",
+    "A014",
+    "A016",
+    "A036",
+    "A037",
+    "A066",
+    "A075",
+    "A088",
+    "A092",
+    "A099"
+  ],
+  "agent_depths": {
+    "A009": 0,
+    "A014": 1,
+    "A016": 0,
+    "A036": 0,
+    "A037": 2,
+    "A066": 2,
+    "A075": 2,
+    "A088": 0,
+    "A092": 1,
+    "A099": 1
+  },
+  "intraday_price_csv": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/data/stock_data.csv",
+  "subturns": [
+    "am",
+    "pm"
+  ]
+}

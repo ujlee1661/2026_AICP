@@ -256,6 +256,35 @@ def sign_metrics(sim_values: list[float], actual_values: list[float]) -> dict[st
     }
 
 
+def compute_direction_metrics(llm_net_buy: list[float], real_net_buy: list[float]) -> dict[str, float]:
+    if len(llm_net_buy) != len(real_net_buy):
+        raise ValueError("llm_net_buy and real_net_buy must have the same length")
+    if not llm_net_buy:
+        return {
+            "direction_match_rate": 0.0,
+            "buy_recall": 0.0,
+            "sell_recall": 0.0,
+            "balanced_accuracy": 0.0,
+        }
+    tp_buy = sum(1 for llm, real in zip(llm_net_buy, real_net_buy) if llm > 0 and real > 0)
+    fn_buy = sum(1 for llm, real in zip(llm_net_buy, real_net_buy) if llm <= 0 and real > 0)
+    tp_sell = sum(1 for llm, real in zip(llm_net_buy, real_net_buy) if llm < 0 and real < 0)
+    fn_sell = sum(1 for llm, real in zip(llm_net_buy, real_net_buy) if llm >= 0 and real < 0)
+    direction_match = sum(
+        1
+        for llm, real in zip(llm_net_buy, real_net_buy)
+        if (llm > 0 and real > 0) or (llm < 0 and real < 0)
+    ) / len(llm_net_buy)
+    buy_recall = tp_buy / (tp_buy + fn_buy) if (tp_buy + fn_buy) else 0.0
+    sell_recall = tp_sell / (tp_sell + fn_sell) if (tp_sell + fn_sell) else 0.0
+    return {
+        "direction_match_rate": round(direction_match, 4),
+        "buy_recall": round(buy_recall, 4),
+        "sell_recall": round(sell_recall, 4),
+        "balanced_accuracy": round((buy_recall + sell_recall) / 2, 4),
+    }
+
+
 def baseline_metrics(actual_values: list[float], market_return_values: list[float] | None = None) -> dict[str, Any]:
     n = len(actual_values)
     if n == 0:
@@ -324,16 +353,17 @@ def load_simulation(run_dir: Path, stock_code: str) -> tuple[str, dict[str, dict
     )
     if daily_path.exists():
         daily_rows = [row for row in read_csv(daily_path) if str(row.get("stock_code") or stock_code) == stock_code]
-        daily_rows.sort(key=lambda row: parse_date(row["date"]))
-        previous_close = None
+        daily_rows.sort(key=lambda row: (parse_date(row["date"]), int(num(row.get("turn")))))
+        close_by_date: dict[str, float] = {}
         for row in daily_rows:
-            if str(row.get("stock_code") or stock_code) == stock_code:
-                date = parse_date(row["date"])
-                close = num(row.get("closing_price"))
-                daily[date]["closing_price"] = close
-                if previous_close and previous_close != 0:
-                    daily[date]["market_return"] = (close - previous_close) / previous_close
-                previous_close = close
+            date = parse_date(row["date"])
+            close_by_date[date] = num(row.get("closing_price"))
+        previous_close = None
+        for date, close in sorted(close_by_date.items()):
+            daily[date]["closing_price"] = close
+            if previous_close and previous_close != 0:
+                daily[date]["market_return"] = (close - previous_close) / previous_close
+            previous_close = close
     for row in fills:
         if str(row.get("stock_code") or stock_code) != stock_code:
             continue
@@ -427,10 +457,18 @@ def summarize_dimension(rows: list[dict[str, Any]], metric_key: str) -> dict[str
     counterside_values = [num(row["counterside_net"]) for row in rows]
     actual_individuals = [num(row["Individuals"]) for row in rows]
     market_returns = [num(row.get("market_return")) for row in rows]
+    primary_metrics = compute_direction_metrics(llm_values, actual_individuals)
+    bundle = metric_bundle(llm_values, actual_individuals)
     summary: dict[str, Any] = {
         "metric": metric_key,
         "overlap_days": len(rows),
-        "llm_vs_individuals": metric_bundle(llm_values, actual_individuals),
+        "primary_metrics": primary_metrics,
+        "reference_metrics": {
+            "pearson_daily": bundle["pearson_correlation"],
+            "pearson_cumulative": bundle["cumulative_max_abs_normalized"]["pearson_correlation"],
+            "note": "누적 Pearson은 상승장 + 단일가 체결 구조상 구조적 역전이 발생할 수 있음",
+        },
+        "llm_vs_individuals": bundle,
         "baselines_vs_individuals": baseline_metrics(actual_individuals, market_returns),
         "counterside_vs_investor_groups": {},
     }
@@ -934,6 +972,15 @@ def main() -> None:
             "skipped_volume_dates": skipped_volume_dates,
             "value": summarize_dimension(value_rows, "value"),
             "volume": summarize_dimension(volume_rows, "volume"),
+        }
+        summary["primary_metrics"] = {
+            "value": summary["value"]["primary_metrics"],
+            "volume": summary["volume"]["primary_metrics"],
+        }
+        summary["reference_metrics"] = {
+            "value": summary["value"]["reference_metrics"],
+            "volume": summary["volume"]["reference_metrics"],
+            "note": "누적 Pearson은 상승장 + 단일가 체결 구조상 구조적 역전이 발생할 수 있음",
         }
         with (output_dir / "summary_metrics.json").open("w", encoding="utf-8") as f:
             json.dump(summary, f, ensure_ascii=False, indent=2)

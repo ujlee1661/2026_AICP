@@ -54,6 +54,40 @@ def _returns_for_volatility(closes: list[float], index: int, window: int = 20) -
     return stdev(returns)
 
 
+def load_4h_data_csv(csv_path: Path | str = config.STOCK_DATA_CSV) -> dict[str, dict[str, float]]:
+    """Load intraday reference prices.
+
+    Preferred project format is stock_data.csv with a price_13 column.
+    The older date,time_slot,price helper format is still accepted.
+    """
+    path = Path(csv_path)
+    if not path.exists():
+        raise FileNotFoundError(f"4h stock data csv not found: {path}")
+    result: dict[str, dict[str, float]] = {}
+    with path.open(encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        columns = set(reader.fieldnames or [])
+        for row in reader:
+            day = str(row.get("date") or "").strip()
+            if not day:
+                continue
+            result.setdefault(day, {})
+            if {"time_slot", "price"} <= columns:
+                slot = str(row.get("time_slot") or "").strip().lower()
+                price = _to_float(row.get("price"))
+            elif "price_13" in columns:
+                slot = "mid"
+                price = _to_float(row.get("price_13"))
+            else:
+                raise ValueError(
+                    "intraday price data must contain either date,time_slot,price "
+                    "or stock_data.csv-style date,price_13 columns"
+                )
+            if slot and price is not None:
+                result[day][slot] = float(price)
+    return result
+
+
 class FundamentalAgent:
     def __init__(self, db_path: Path | str = config.SIM_DB) -> None:
         self.db_path = Path(db_path)
@@ -162,6 +196,25 @@ class FundamentalAgent:
             "ma5": row["ma5"],
             "ma20": row["ma20"],
             "volatility_20d": row["volatility_20d"],
+        }
+
+    def get_daily_prices(self, date: str, stock_code: str = config.STOCK_CODE) -> dict[str, float]:
+        with connect(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT open_price, high_price, low_price, close_price
+                FROM StockData
+                WHERE date = ? AND stock_id = ?
+                """,
+                (date, stock_code),
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"daily prices not found for {stock_code} on {date}")
+        return {
+            "open": float(row["open_price"] if row["open_price"] is not None else row["close_price"]),
+            "high": float(row["high_price"] if row["high_price"] is not None else row["close_price"]),
+            "low": float(row["low_price"] if row["low_price"] is not None else row["close_price"]),
+            "close": float(row["close_price"]),
         }
 
     def _ensure_columns(self) -> None:
