@@ -449,10 +449,11 @@ def _sample_balanced_depths(
 ) -> list[dict[str, Any]]:
     if max_agents <= 0:
         return []
-    rng = random.Random(random_seed)
     by_depth: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for agent in agents:
         by_depth[int(agent.get("news_depth") or 0)].append(agent)
+    for candidates in by_depth.values():
+        candidates.sort(key=lambda agent: agent["agent_id"])
 
     depths = [0, 1, 2]
     missing = [depth for depth in depths if not by_depth.get(depth)]
@@ -469,12 +470,13 @@ def _sample_balanced_depths(
     for depth in depths:
         candidates = by_depth[depth]
         take = min(quotas[depth], len(candidates))
-        selected.extend(rng.sample(candidates, take))
+        selected.extend(candidates[:take])
 
     if len(selected) < max_agents:
         selected_ids = {agent["agent_id"] for agent in selected}
         remaining = [agent for agent in agents if agent["agent_id"] not in selected_ids]
-        selected.extend(rng.sample(remaining, min(max_agents - len(selected), len(remaining))))
+        remaining.sort(key=lambda agent: agent["agent_id"])
+        selected.extend(remaining[: max_agents - len(selected)])
 
     return sorted(selected, key=lambda agent: agent["agent_id"])
 
