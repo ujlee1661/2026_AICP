@@ -1,0 +1,4 @@
+﻿run_id,date,turn,subturn,stock_code,submitted_orders,announced_price,close_price,volume,fill_count
+simulation_20260703_213316,2026-02-27,1,am,005930,10,210000.0,216500.0,4246,10
+simulation_20260703_213316,2026-02-27,2,pm,005930,10,216500.0,216500.0,4139,10
+simulation_20260703_213316,2026-03-03,3,am,005930,10,209500.0,195100.0,2561,10

@@ -1,0 +1,1 @@
+{"run_id": "simulation_20260703_211649", "event": "agent_error", "date": "2026-02-27", "turn": 1, "agent_id": "A012", "error_type": "KeyError", "error": "'\\n  \"action\"'"}

@@ -60,11 +60,11 @@ Step 1의 방향과 Step 2의 수량을 종합하여 최종 action, quantity, re
 - risk_control: 리스크 관리 방침.
 
 출력 예시:
-{
+{{
   "action": "buy",
   "quantity": 10,
   "reason": "공시가와 뉴스 흐름, 현재 현금 비중을 고려해 제한적으로 매수합니다.",
   "risk_control": "현금 여력을 남기고 단일 종목 과도한 집중을 피합니다."
-}
+}}
 
 price, order_type, hold, market, limit 필드는 출력하지 마세요.
