@@ -60,6 +60,7 @@ def _patched_getaddrinfo(host, port, *args, **kwargs):
 
 socket.getaddrinfo = _patched_getaddrinfo
 
+import config
 from twinmarket_kr.simulation import run_simulation
 
 
@@ -85,8 +86,29 @@ def main() -> None:
         help="Allowed trading actions for the decision parser.",
     )
     parser.add_argument("--balanced-depths", action="store_true")
+    parser.add_argument(
+        "--use-fake-news-injection",
+        action="store_true",
+        help="Use outputs/processed_news_injection.csv and outputs/daily_news_selection_injection.csv.",
+    )
+    parser.add_argument(
+        "--fake-news-mode",
+        choices=("off", "on"),
+        default=None,
+        help="Control whether rows marked is_fake=true are visible to agents.",
+    )
+    parser.add_argument("--processed-news-csv", default=None)
+    parser.add_argument("--daily-news-csv", default=None)
     parser.add_argument("--no-logs", action="store_true", help="Disable detailed output logs.")
     args = parser.parse_args()
+    processed_news_csv = args.processed_news_csv
+    daily_news_csv = args.daily_news_csv
+    fake_news_mode = args.fake_news_mode
+    if fake_news_mode is None:
+        fake_news_mode = "on" if args.use_fake_news_injection else "off"
+    if args.use_fake_news_injection or fake_news_mode == "on":
+        processed_news_csv = processed_news_csv or str(config.PROCESSED_NEWS_INJECTION_CSV)
+        daily_news_csv = daily_news_csv or str(config.DAILY_NEWS_SELECTION_INJECTION_CSV)
     asyncio.run(
         run_simulation(
             max_agents=args.max_agents,
@@ -100,6 +122,9 @@ def main() -> None:
             information_mode=args.information_mode,
             decision_space=args.decision_space,
             balanced_depths=args.balanced_depths,
+            processed_news_csv=processed_news_csv,
+            daily_news_csv=daily_news_csv,
+            fake_news_mode=fake_news_mode,
         )
     )
 

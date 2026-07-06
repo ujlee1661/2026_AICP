@@ -26,6 +26,46 @@ BAD_SUMMARY_MARKERS = {"사진확대", "사진 확대"}
 EXCLUDED_TITLE_PATTERNS = (
     re.compile(r"^\s*\[?표\]?\s*외국\s*환율\s*고시표?\s*$"),
 )
+TRUE_TEXTS = {"1", "true", "yes", "y"}
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in TRUE_TEXTS
+
+
+def _public_title_item(row: dict[str, Any], *, include_time: bool = False) -> dict[str, str]:
+    item = {
+        "id": str(row.get("id", "")),
+        "title": str(row.get("title", "")),
+        "date": str(row.get("date", "")),
+        "type": str(row.get("category", "")),
+    }
+    if include_time:
+        item["time"] = str(row.get("time", ""))
+    return item
+
+
+def _public_content_item(row: dict[str, Any]) -> dict[str, str]:
+    return {
+        "id": str(row.get("id", "")),
+        "title": str(row.get("title", "")),
+        "date": str(row.get("date", "")),
+        "content": str(row.get("summary", "")),
+        "type": str(row.get("category", "")),
+    }
+
+
+def _public_search_item(row: dict[str, Any], score: float) -> dict[str, Any]:
+    return {
+        "id": str(row.get("id", "")),
+        "title": str(row.get("title", "")),
+        "date": str(row.get("date", "")),
+        "category": str(row.get("category", "")),
+        "summary": str(row.get("summary", "")),
+        "relevance_score": score,
+    }
 
 
 def _select_daily(rows: list[dict[str, Any]], *, seed: int | None = None) -> list[dict[str, Any]]:
@@ -227,22 +267,25 @@ class NewsAgent:
         self,
         processed_csv_path: Path | str = config.PROCESSED_NEWS_CSV,
         daily_csv_path: Path | str = config.DAILY_NEWS_SELECTION_CSV,
+        *,
+        include_fake_news: bool = False,
     ) -> None:
         self.processed_csv_path = Path(processed_csv_path)
         self.daily_csv_path = Path(daily_csv_path)
-        self._processed = self._load_csv(self.processed_csv_path)
-        self._daily = self._load_csv(self.daily_csv_path)
+        self.include_fake_news = include_fake_news
+        self._processed = self._filter_fake_rows(self._load_csv(self.processed_csv_path))
+        self._daily = self._filter_fake_rows(self._load_csv(self.daily_csv_path))
         self._by_id = {row["id"]: row for row in self._processed}
         self._by_title = {row["title"]: row for row in self._processed}
 
+    def _filter_fake_rows(self, rows: list[dict[str, str]]) -> list[dict[str, str]]:
+        if self.include_fake_news:
+            return rows
+        return [row for row in rows if not _truthy(row.get("is_fake"))]
+
     def get_daily_titles(self, target_date: str) -> list[dict[str, str]]:
         return [
-            {
-                "id": row["id"],
-                "title": row["title"],
-                "date": row["date"],
-                "type": row.get("category", ""),
-            }
+            _public_title_item(row)
             for row in self._daily
             if row.get("date") == target_date
         ]
@@ -256,13 +299,7 @@ class NewsAgent:
         end_time: str,
     ) -> list[dict[str, str]]:
         return [
-            {
-                "id": row["id"],
-                "title": row["title"],
-                "date": row["date"],
-                "time": row.get("time", ""),
-                "type": row.get("category", ""),
-            }
+            _public_title_item(row, include_time=True)
             for row in self._daily
             if _in_datetime_window(
                 row,
@@ -301,16 +338,7 @@ class NewsAgent:
             seen.add(row["id"])
             if max_items is not None and len(deduped) >= max_items:
                 break
-        return [
-            {
-                "id": row["id"],
-                "title": row["title"],
-                "date": row["date"],
-                "content": row.get("summary", ""),
-                "type": row.get("category", ""),
-            }
-            for row in deduped
-        ]
+        return [_public_content_item(row) for row in deduped]
 
     def search_news(
         self,
@@ -338,7 +366,7 @@ class NewsAgent:
                     scored.append((score, row))
             scored.sort(key=lambda item: (-item[0], item[1]["date"], item[1]["title"]))
             result[field_name] = [
-                {"id": row["id"], "title": row["title"], "date": row["date"], "type": row["category"]}
+                _public_title_item(row)
                 for _, row in scored[:max_per_field]
             ]
         return result
@@ -391,17 +419,7 @@ class NewsAgent:
                     scored.append((0.0, row))
                     seen_ids.add(row["id"])
         scored.sort(key=lambda item: (-item[0], -_parse_date(item[1]["date"]).toordinal(), item[1]["title"]))
-        return [
-            {
-                "id": row["id"],
-                "title": row["title"],
-                "date": row["date"],
-                "category": row.get("category", ""),
-                "summary": row.get("summary", ""),
-                "relevance_score": score,
-            }
-            for score, row in scored[:top_n]
-        ]
+        return [_public_search_item(row, score) for score, row in scored[:top_n]]
 
     def build_base_context(self, target_date: str, news_depth: int = 1) -> dict[str, Any]:
         daily_titles = self.get_daily_titles(target_date)
@@ -412,7 +430,7 @@ class NewsAgent:
             "search_results": {},
             "search_read_contents": [],
             "limits": {
-                "daily_read_max": 0 if news_depth <= 0 else 10,
+                "daily_read_max": 0 if news_depth <= 0 else len(daily_titles),
                 "search_fields_max": 0,
                 "search_read_max": 10 if news_depth >= 2 else 0,
                 "lookback_days": 7 if news_depth >= 2 else 0,
@@ -447,7 +465,7 @@ class NewsAgent:
                 "end_time": end_time,
             },
             "limits": {
-                "daily_read_max": 0 if news_depth <= 0 else 10,
+                "daily_read_max": 0 if news_depth <= 0 else len(daily_titles),
                 "search_fields_max": 0,
                 "search_read_max": 10 if news_depth >= 2 else 0,
                 "lookback_days": 0,
@@ -470,7 +488,7 @@ class NewsAgent:
             read_contents = self.read_news(
                 ids=[str(row.get("id")) for row in daily_titles if row.get("id")],
                 allowed_ids=allowed_daily_ids,
-                max_items=10,
+                max_items=len(daily_titles),
             )
 
         expanded = dict(base_context)
@@ -478,6 +496,56 @@ class NewsAgent:
         expanded.setdefault("search_results", {})
         expanded.setdefault("search_read_contents", [])
         return expanded
+
+    def fake_audit_for_context(
+        self,
+        news_context: dict[str, Any],
+        *,
+        selected_news: list[Any] | None = None,
+    ) -> dict[str, Any]:
+        base_ids = self._ids_from_items(news_context.get("daily_titles") or [])
+        read_ids = self._ids_from_items(news_context.get("read_contents") or [])
+        search_ids = self._ids_from_items(news_context.get("search_read_contents") or [])
+        selected_ids, selected_titles = self._normalize_selected_news(selected_news or [])
+        selected_ids.extend(
+            row["id"]
+            for title in selected_titles
+            for row in [self._by_title.get(title)]
+            if row and row.get("id")
+        )
+
+        buckets = {
+            "base": base_ids,
+            "read": read_ids,
+            "search": search_ids,
+            "selected": selected_ids,
+        }
+        items_by_id: dict[str, dict[str, Any]] = {}
+        sources_by_id: dict[str, set[str]] = defaultdict(set)
+        for source, ids in buckets.items():
+            for news_id in ids:
+                row = self._by_id.get(news_id)
+                if not row or not _truthy(row.get("is_fake")):
+                    continue
+                items_by_id[news_id] = row
+                sources_by_id[news_id].add(source)
+
+        items = [
+            self._fake_audit_item(row, sorted(sources_by_id[news_id]))
+            for news_id, row in sorted(items_by_id.items(), key=lambda item: item[0])
+        ]
+        fake_ids = [item["id"] for item in items]
+        return {
+            "fake_exposed": bool(items),
+            "fake_base_count": self._fake_count(base_ids),
+            "fake_read_count": self._fake_count(read_ids),
+            "fake_search_count": self._fake_count(search_ids),
+            "fake_selected_count": self._fake_count(selected_ids),
+            "fake_public_ids": fake_ids,
+            "fake_synthetic_ids": [item.get("synthetic_id", "") for item in items if item.get("synthetic_id")],
+            "fake_related_events": [item.get("related_event", "") for item in items if item.get("related_event")],
+            "items": items,
+        }
 
     @staticmethod
     def _normalize_selected_news(selected_news: list[Any]) -> tuple[list[str], list[str]]:
@@ -500,6 +568,38 @@ class NewsAgent:
                 else:
                     titles.append(text)
         return ids, titles
+
+    @staticmethod
+    def _ids_from_items(items: Any) -> list[str]:
+        result: list[str] = []
+        if isinstance(items, dict):
+            iterable = [entry for values in items.values() if isinstance(values, list) for entry in values]
+        elif isinstance(items, list):
+            iterable = items
+        else:
+            iterable = []
+        for item in iterable:
+            if isinstance(item, dict) and item.get("id"):
+                result.append(str(item["id"]))
+        return result
+
+    def _fake_count(self, ids: list[str]) -> int:
+        return sum(1 for news_id in ids if _truthy((self._by_id.get(news_id) or {}).get("is_fake")))
+
+    @staticmethod
+    def _fake_audit_item(row: dict[str, Any], sources: list[str]) -> dict[str, Any]:
+        return {
+            "id": row.get("id", ""),
+            "synthetic_id": row.get("synthetic_id", ""),
+            "title": row.get("title", ""),
+            "date": row.get("date", ""),
+            "time": row.get("time", ""),
+            "category": row.get("category", ""),
+            "sources": sources,
+            "linked_event_id": row.get("linked_event_id", ""),
+            "related_event": row.get("related_event", ""),
+            "misinformation_type": row.get("misinformation_type", ""),
+        }
 
     @staticmethod
     def _load_csv(path: Path) -> list[dict[str, str]]:

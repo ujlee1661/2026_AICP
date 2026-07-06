@@ -5,6 +5,7 @@ import csv
 import json
 import random
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 import config
@@ -31,6 +32,7 @@ def trading_dates_between(
     start_date: str | None = None,
     end_date: str | None = None,
     limit: int | None = None,
+    daily_news_csv_path: Path | str = config.DAILY_NEWS_SELECTION_CSV,
 ) -> list[str]:
     with connect(config.SIM_DB) as conn:
         rows = conn.execute(
@@ -38,7 +40,7 @@ def trading_dates_between(
             (config.STOCK_CODE,),
         ).fetchall()
     dates = [str(row["date"]) for row in rows]
-    news_dates = _daily_news_dates()
+    news_dates = _daily_news_dates(daily_news_csv_path)
     if news_dates:
         dates = [day for day in dates if day in news_dates]
     if start_date:
@@ -62,10 +64,11 @@ def _previous_date_map() -> dict[str, str]:
     return {day: dates[index - 1] for index, day in enumerate(dates) if index > 0}
 
 
-def _daily_news_dates() -> set[str]:
-    if not config.DAILY_NEWS_SELECTION_CSV.exists():
+def _daily_news_dates(daily_news_csv_path: Path | str = config.DAILY_NEWS_SELECTION_CSV) -> set[str]:
+    path = Path(daily_news_csv_path)
+    if not path.exists():
         return set()
-    with config.DAILY_NEWS_SELECTION_CSV.open(encoding="utf-8-sig", newline="") as f:
+    with path.open(encoding="utf-8-sig", newline="") as f:
         return {row["date"] for row in csv.DictReader(f) if row.get("date")}
 
 
@@ -82,11 +85,18 @@ async def run_simulation(
     information_mode: str = "pre_close_cutoff",
     decision_space: str = "buy_sell_only",
     balanced_depths: bool = False,
+    processed_news_csv: Path | str | None = None,
+    daily_news_csv: Path | str | None = None,
+    fake_news_mode: str = "off",
 ) -> None:
     if information_mode not in {"pre_close_cutoff", "same_day", "prior_close"}:
         raise ValueError("information_mode must be 'pre_close_cutoff', 'same_day', or 'prior_close'")
     if decision_space != "buy_sell_only":
         raise ValueError("decision_space must be 'buy_sell_only'")
+    if fake_news_mode not in {"off", "on"}:
+        raise ValueError("fake_news_mode must be 'off' or 'on'")
+    processed_news_path = Path(processed_news_csv) if processed_news_csv else config.PROCESSED_NEWS_CSV
+    daily_news_path = Path(daily_news_csv) if daily_news_csv else config.DAILY_NEWS_SELECTION_CSV
     agents = load_agents_from_sys100(config.SYS_100_DB)
     if max_agents:
         all_agents = agents
@@ -101,7 +111,12 @@ async def run_simulation(
     previous_by_date = _previous_date_map()
     uses_previous_market = information_mode in {"pre_close_cutoff", "prior_close"}
     date_limit = None if max_days is None else max_days + (1 if uses_previous_market else 0)
-    dates = trading_dates_between(start_date=start_date, end_date=end_date, limit=date_limit)
+    dates = trading_dates_between(
+        start_date=start_date,
+        end_date=end_date,
+        limit=date_limit,
+        daily_news_csv_path=daily_news_path,
+    )
     if uses_previous_market:
         dates = [day for day in dates if day in previous_by_date]
         if max_days:
@@ -112,7 +127,11 @@ async def run_simulation(
     _reset_runtime_tables(config.SIM_DB)
     memory = MemoryAgent(config.SIM_DB)
     fundamental = FundamentalAgent(config.SIM_DB)
-    news = NewsAgent()
+    news = NewsAgent(
+        processed_csv_path=processed_news_path,
+        daily_csv_path=daily_news_path,
+        include_fake_news=fake_news_mode == "on",
+    )
     exchange = ExchangeAgent(config.SIM_DB)
     execution_prices = _load_execution_prices(fundamental, dates)
     community = CommunityAgent(config.SIM_DB) if config.ENABLE_COMMUNITY else None
@@ -138,6 +157,9 @@ async def run_simulation(
                 "limit_only_orders": False,
                 "exchange_mode": "announced_price_binary",
                 "balanced_depths": balanced_depths,
+                "processed_news_csv": str(processed_news_path),
+                "daily_news_csv": str(daily_news_path),
+                "fake_news_mode": fake_news_mode,
                 "agent_ids": [agent["agent_id"] for agent in agents],
                 "agent_depths": {agent["agent_id"]: int(agent.get("news_depth") or 0) for agent in agents},
                 "subturns": ["am", "pm"],

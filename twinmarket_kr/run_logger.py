@@ -50,6 +50,14 @@ class SimulationLogger:
             "selected_news_count",
             "read_news_count",
             "search_read_count",
+            "fake_exposed",
+            "fake_base_count",
+            "fake_read_count",
+            "fake_search_count",
+            "fake_selected_count",
+            "fake_public_ids",
+            "fake_synthetic_ids",
+            "fake_related_events",
             "depth2_search_keywords",
             "depth2_search_result_count",
             "depth2_view_change",
@@ -185,6 +193,7 @@ class SimulationLogger:
         decision: dict[str, Any],
         order: dict[str, Any] | None,
         depth2_flow: dict[str, Any] | None = None,
+        fake_news_audit: dict[str, Any] | None = None,
     ) -> None:
         news_context = context.get("news_context") or {}
         event = {
@@ -202,6 +211,8 @@ class SimulationLogger:
         }
         if depth2_flow is not None:
             event["depth2_flow"] = depth2_flow
+        if fake_news_audit is not None:
+            event["fake_news_audit"] = fake_news_audit
         self.write_jsonl("agent_turns.jsonl", event)
         selected_news = news_interpretation.get("selected_news") or []
         step3 = (depth2_flow or {}).get("step3_search") or {}
@@ -227,6 +238,17 @@ class SimulationLogger:
                 "selected_news_count": len(selected_news) if isinstance(selected_news, list) else 0,
                 "read_news_count": len(news_context.get("read_contents") or []),
                 "search_read_count": len(news_context.get("search_read_contents") or []),
+                "fake_exposed": bool((fake_news_audit or {}).get("fake_exposed")),
+                "fake_base_count": (fake_news_audit or {}).get("fake_base_count", 0),
+                "fake_read_count": (fake_news_audit or {}).get("fake_read_count", 0),
+                "fake_search_count": (fake_news_audit or {}).get("fake_search_count", 0),
+                "fake_selected_count": (fake_news_audit or {}).get("fake_selected_count", 0),
+                "fake_public_ids": ", ".join((fake_news_audit or {}).get("fake_public_ids") or []),
+                "fake_synthetic_ids": ", ".join((fake_news_audit or {}).get("fake_synthetic_ids") or []),
+                "fake_related_events": json.dumps(
+                    (fake_news_audit or {}).get("fake_related_events") or [],
+                    ensure_ascii=False,
+                ),
                 "depth2_search_keywords": ", ".join(step3.get("keywords") or []),
                 "depth2_search_result_count": step3.get("result_count", ""),
                 "depth2_view_change": step4.get("view_change", ""),

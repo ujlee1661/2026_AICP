@@ -230,6 +230,10 @@ async def run_agent_turn(
             "subturn": today_context["subturn"],
         }
     if event_logger is not None:
+        fake_news_audit = news_agent.fake_audit_for_context(
+            today_context["news_context"],
+            selected_news=news_interpretation.get("selected_news") or [],
+        )
         event_logger.log_agent_turn(
             agent=agent,
             turn=turn,
@@ -241,6 +245,7 @@ async def run_agent_turn(
             decision=decision,
             order=order,
             depth2_flow=depth2_flow,
+            fake_news_audit=fake_news_audit,
         )
     return {
         "agent": agent,
