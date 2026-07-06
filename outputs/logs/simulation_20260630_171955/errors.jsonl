@@ -1,1 +1,0 @@
-{"run_id": "simulation_20260630_171955", "event": "agent_error", "date": "2026-04-24", "turn": 1, "agent_id": "A056", "error_type": "AttributeError", "error": "'FakeClient' object has no attribute 'chat'"}

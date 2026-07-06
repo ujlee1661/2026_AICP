@@ -1,1 +1,0 @@
-{"run_id": "simulation_20260610_172851", "event": "agent_error", "date": "2025-02-11", "turn": 1, "agent_id": "A088", "error_type": "ValueError", "error": "depth2 pre-search JSON missing keys: ['search_keywords']"}

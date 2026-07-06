@@ -1,3 +1,0 @@
-﻿run_id,date,turn,agent_id,depth,read_limit,visible_post_count,visible_post_ids,visible_posts_json
-simulation_20260630_172019,2026-04-24,1,A056,2,10,1,[673],"[{""post_id"": 673, ""anonymous_code"": ""늑대-3694"", ""post_type"": ""trade_share"", ""title"": ""fake post"", ""like_count"": 0, ""unlike_count"": 0, ""score"": 0, ""author_badges"": []}]"
-simulation_20260630_172019,2026-04-24,1,A098,1,5,1,[672],"[{""post_id"": 672, ""anonymous_code"": ""여우-1683"", ""post_type"": ""trade_share"", ""title"": ""fake post"", ""like_count"": 0, ""unlike_count"": 0, ""score"": 0, ""author_badges"": [""상위 수익자"", ""자산가"", ""커뮤니티 인플루언서""]}]"

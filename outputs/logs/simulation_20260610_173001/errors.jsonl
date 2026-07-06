@@ -1,1 +1,0 @@
-{"run_id": "simulation_20260610_173001", "event": "agent_error", "date": "2025-02-11", "turn": 1, "agent_id": "A053", "error_type": "ValueError", "error": "market analysis JSON missing keys: ['caution', 'confidence']"}

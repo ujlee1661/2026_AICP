@@ -1,2 +1,0 @@
-﻿run_id,date,turn,agent_id,stock_code,direction,quantity,price,order_type,reason
-simulation_20260611_143826,2025-02-11,1,A077,005930,buy,500,55500.0,limit,"시카고 경찰 납품 성과와 엔비디아 반등, AI 수요 증가 기대감으로 인한 반등 가능성. HBM 수요 증가와 AI 생태계 참여 전략 성공 시 내재가치 상승 기대. 단기 변동성 확대 예상으로 분할 매수 관점에서 접근."
