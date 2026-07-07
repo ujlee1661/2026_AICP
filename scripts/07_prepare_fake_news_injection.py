@@ -19,33 +19,56 @@ import config
 
 PRIVATE_FIELDS = [
     "is_fake",
+    "fake_news_id",
     "synthetic_id",
+    "related_event_id",
     "linked_event_id",
     "linked_event_ids",
+    "linked_event_offsets",
     "related_event",
     "related_events",
+    "related_event_type",
     "misinformation_type",
+    "misinformation_type_label",
     "false_information_class",
     "injection_phase",
     "injection_offset",
+    "injection_window_policy",
     "time_slot",
     "feed_slot",
     "risk_level",
+    "misinformation_risk_score",
     "claim_pattern",
     "false_claim",
     "correct_fact",
+    "distortion_strategy",
+    "target_effect",
     "why_false_or_misleading",
     "detection_clues",
     "replace_target_news_id",
     "replace_target_title",
     "replace_target_category",
     "replace_target_time",
+    "replace_target_time_slot",
+    "replace_target_feed_slot",
+    "replace_target_feed_position",
     "replace_target_timestamp",
+    "baseline_news_count",
+    "real_news_count_after_replacement",
+    "fake_news_count",
+    "baseline_feed_source",
     "information_cutoff_date",
     "information_cutoff_timestamp",
+    "event_date",
+    "event_timestamp",
+    "event_predictability",
+    "event_timestamp_after_target",
     "leakage_safe",
+    "data_leakage_control",
     "can_use_event_outcome",
     "uses_future_event_details",
+    "source_generation_method",
+    "agent_visible_label_removed",
     "generated_by",
     "prompt_version",
 ]
@@ -92,7 +115,7 @@ def _category(row: dict[str, Any]) -> str:
 
 
 def _public_news_id(row: dict[str, Any]) -> str:
-    synthetic_id = _clean(row.get("synthetic_id"))
+    synthetic_id = _clean(row.get("fake_news_id") or row.get("synthetic_id"))
     day = _clean(row.get("date")).replace("-", "")
     category = _category(row)
     digest = hashlib.sha1(synthetic_id.encode("utf-8")).hexdigest()[:8]
@@ -105,15 +128,19 @@ def _fake_rows(fake_pkl_path: Path, *, approved_only: bool = True) -> list[dict[
     result: list[dict[str, Any]] = []
     for raw in rows:
         if approved_only:
-            if bool(raw.get("final_approval")) is not True:
+            final_approval = raw.get("final_approval", True)
+            leakage_safe = raw.get("leakage_safe", raw.get("agent_visible_label_removed", True))
+            if bool(final_approval) is not True:
                 continue
-            if bool(raw.get("leakage_safe")) is not True:
+            if bool(leakage_safe) is not True:
                 continue
         date = _clean(raw.get("date"))
         title = _clean(raw.get("title"))
-        summary = _clean(raw.get("content") or raw.get("summary"))
+        daily_summary = _clean(raw.get("content") or raw.get("summary"))
+        search_summary = _clean(raw.get("summary") or daily_summary)
         time_text = _clean(raw.get("time"))
-        if not date or not title or not summary or not time_text:
+        replace_target_news_id = _clean(raw.get("replace_target_news_id"))
+        if not date or not title or not daily_summary or not time_text or not replace_target_news_id:
             continue
         row: dict[str, Any] = {
             "id": _public_news_id(raw),
@@ -121,12 +148,16 @@ def _fake_rows(fake_pkl_path: Path, *, approved_only: bool = True) -> list[dict[
             "date": date,
             "time": time_text[:5],
             "category": _category(raw),
-            "summary": summary,
+            "summary": daily_summary,
             "is_fake": "true",
-            "synthetic_id": _clean(raw.get("synthetic_id")),
+            "synthetic_id": _clean(raw.get("synthetic_id") or raw.get("fake_news_id")),
+            "fake_news_id": _clean(raw.get("fake_news_id") or raw.get("synthetic_id")),
+            "replace_target_news_id": replace_target_news_id,
         }
+        if search_summary and search_summary != daily_summary:
+            row["search_summary"] = search_summary
         for field in PRIVATE_FIELDS:
-            if field in {"is_fake", "synthetic_id"}:
+            if field in {"is_fake", "synthetic_id", "fake_news_id", "replace_target_news_id"}:
                 continue
             value = raw.get(field)
             if isinstance(value, (list, tuple, set)):
@@ -136,6 +167,40 @@ def _fake_rows(fake_pkl_path: Path, *, approved_only: bool = True) -> list[dict[
             else:
                 row[field] = _clean(value)
         result.append(row)
+    return result
+
+
+def _replace_daily_rows(
+    daily_rows: list[dict[str, Any]],
+    fake_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    fake_by_target = {row["replace_target_news_id"]: row for row in fake_rows}
+    replaced_targets: set[str] = set()
+    result: list[dict[str, Any]] = []
+    for row in daily_rows:
+        target_id = _clean(row.get("id"))
+        fake = fake_by_target.get(target_id)
+        if not fake:
+            result.append(row)
+            continue
+        replaced_targets.add(target_id)
+        result.append(
+            {
+                key: fake.get(key, "")
+                for key in [
+                    "id",
+                    "title",
+                    "date",
+                    "time",
+                    "category",
+                    *PRIVATE_FIELDS,
+                ]
+                if key != "summary"
+            }
+        )
+    missing_targets = sorted(set(fake_by_target) - replaced_targets)
+    if missing_targets:
+        raise ValueError(f"replace_target_news_id not found in daily csv: {missing_targets[:5]}")
     return result
 
 
@@ -187,27 +252,12 @@ def prepare_fake_news_injection(
         raise ValueError(f"fake public ids collide with existing news ids: {duplicate_ids[:5]}")
 
     processed_out = [*processed, *fake_rows]
-    daily_fake_rows = [
-        {
-            key: row.get(key, "")
-            for key in [
-                "id",
-                "title",
-                "date",
-                "time",
-                "category",
-                *PRIVATE_FIELDS,
-            ]
-            if key != "summary"
-        }
-        for row in fake_rows
-    ]
-    daily_out = [*daily, *daily_fake_rows]
+    daily_out = _replace_daily_rows(daily, fake_rows)
 
     _write_csv(
         output_processed_csv_path,
         processed_out,
-        ["id", "title", "date", "time", "category", "summary", *PRIVATE_FIELDS],
+        ["id", "title", "date", "time", "category", "summary", "search_summary", *PRIVATE_FIELDS],
     )
     _write_csv(
         output_daily_csv_path,
@@ -227,6 +277,7 @@ def prepare_fake_news_injection(
         "fake_count": len(fake_rows),
         "processed_count": len(processed_out),
         "daily_count": len(daily_out),
+        "replacement_mode": "replace_target_news_id",
         "fake_by_date": {},
         "events": _event_manifest(event_pkl_path),
     }

@@ -63,7 +63,7 @@ def _public_search_item(row: dict[str, Any], score: float) -> dict[str, Any]:
         "title": str(row.get("title", "")),
         "date": str(row.get("date", "")),
         "category": str(row.get("category", "")),
-        "summary": str(row.get("summary", "")),
+        "summary": str(row.get("search_summary") or row.get("summary", "")),
         "relevance_score": score,
     }
 
@@ -110,12 +110,15 @@ def _in_datetime_window(
     start_time: str,
     end_date: str,
     end_time: str,
+    include_start: bool = False,
 ) -> bool:
     row_dt = _combine_datetime(str(row.get("date", "")), str(row.get("time", "")))
     start_dt = _combine_datetime(start_date, start_time)
     end_dt = _combine_datetime(end_date, end_time)
     if row_dt is None or start_dt is None or end_dt is None:
         return False
+    if include_start:
+        return start_dt <= row_dt <= end_dt
     return start_dt < row_dt <= end_dt
 
 
@@ -298,8 +301,8 @@ class NewsAgent:
         end_date: str,
         end_time: str,
     ) -> list[dict[str, str]]:
-        return [
-            _public_title_item(row, include_time=True)
+        window_rows = [
+            row
             for row in self._daily
             if _in_datetime_window(
                 row,
@@ -308,6 +311,10 @@ class NewsAgent:
                 end_date=end_date,
                 end_time=end_time,
             )
+        ]
+        return [
+            _public_title_item(row, include_time=True)
+            for row in self._limit_window_fake_rows(window_rows)
         ]
 
     def read_news(
@@ -360,7 +367,8 @@ class NewsAgent:
             keywords = [str(keyword).strip() for keyword in field.get("keywords", []) if str(keyword).strip()]
             scored = []
             for row in candidates:
-                haystack = f"{row['title']} {row.get('summary', '')}"
+                search_summary = row.get("search_summary") or row.get("summary", "")
+                haystack = f"{row['title']} {search_summary}"
                 score = sum(haystack.count(keyword) for keyword in keywords)
                 if score > 0:
                     scored.append((score, row))
@@ -396,6 +404,7 @@ class NewsAgent:
                     start_time=window_start_time,
                     end_date=window_end_date,
                     end_time=window_end_time,
+                    include_start=True,
                 )
             ]
         else:
@@ -406,9 +415,10 @@ class NewsAgent:
             ]
         scored: list[tuple[float, dict[str, str]]] = []
         for row in candidates:
-            haystack = f"{row['title']} {row.get('summary', '')}"
+            search_summary = row.get("search_summary") or row.get("summary", "")
+            haystack = f"{row['title']} {search_summary}"
             title_hits = sum(str(row["title"]).count(keyword) for keyword in normalized_keywords)
-            body_hits = sum(str(row.get("summary", "")).count(keyword) for keyword in normalized_keywords)
+            body_hits = sum(str(search_summary).count(keyword) for keyword in normalized_keywords)
             score = title_hits * 2.0 + body_hits
             if score > 0:
                 scored.append((score, row))
@@ -430,7 +440,7 @@ class NewsAgent:
             "search_results": {},
             "search_read_contents": [],
             "limits": {
-                "daily_read_max": 0 if news_depth <= 0 else len(daily_titles),
+                "daily_read_max": 0 if news_depth <= 0 else 10,
                 "search_fields_max": 0,
                 "search_read_max": 10 if news_depth >= 2 else 0,
                 "lookback_days": 7 if news_depth >= 2 else 0,
@@ -465,7 +475,7 @@ class NewsAgent:
                 "end_time": end_time,
             },
             "limits": {
-                "daily_read_max": 0 if news_depth <= 0 else len(daily_titles),
+                "daily_read_max": 0 if news_depth <= 0 else 10,
                 "search_fields_max": 0,
                 "search_read_max": 10 if news_depth >= 2 else 0,
                 "lookback_days": 0,
@@ -488,7 +498,7 @@ class NewsAgent:
             read_contents = self.read_news(
                 ids=[str(row.get("id")) for row in daily_titles if row.get("id")],
                 allowed_ids=allowed_daily_ids,
-                max_items=len(daily_titles),
+                max_items=10,
             )
 
         expanded = dict(base_context)
@@ -496,6 +506,33 @@ class NewsAgent:
         expanded.setdefault("search_results", {})
         expanded.setdefault("search_read_contents", [])
         return expanded
+
+    def _limit_window_fake_rows(self, rows: list[dict[str, str]]) -> list[dict[str, str]]:
+        if not self.include_fake_news:
+            return rows
+        candidates: list[tuple[datetime, int, dict[str, str]]] = []
+        for index, row in enumerate(rows):
+            if not _truthy(row.get("is_fake")):
+                continue
+            fake_dt = _combine_datetime(row.get("date", ""), row.get("time", ""))
+            if fake_dt is not None:
+                candidates.append((fake_dt, index, row))
+        if not candidates:
+            return rows
+        _, selected_index, selected_fake = max(candidates, key=lambda item: (item[0], item[1]))
+        without_other_fakes = [
+            row
+            for index, row in enumerate(rows)
+            if index == selected_index or not _truthy(row.get("is_fake"))
+        ]
+        selected_current_index = without_other_fakes.index(selected_fake)
+        if selected_current_index >= 10:
+            return [
+                selected_fake,
+                *without_other_fakes[:selected_current_index],
+                *without_other_fakes[selected_current_index + 1:],
+            ]
+        return without_other_fakes
 
     def fake_audit_for_context(
         self,

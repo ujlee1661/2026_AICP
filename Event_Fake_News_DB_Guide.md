@@ -1,315 +1,218 @@
-@@ -0,0 +1,290 @@
 # Event/Fake News DB Guide
 
-이 문서는 삼성전자 이벤트 기반 가짜뉴스 주입 실험을 위해 만든
-`data/event.pkl`과 `data/fake_new.pkl`의 생성 방식, 데이터 구조,
-검증 결과, 사용 규칙을 팀원이 공유하기 위한 가이드다.
+이 문서는 삼성전자 이벤트 기반 가짜뉴스 주입 실험을 위해 만든 데이터의 생성 기준, 파일 역할, 사용 방법을 팀원이 공유하기 위한 가이드다.
 
-## 1. 목적
+## 1. 실험 목적
 
-이 데이터는 트레이딩 에이전트가 동일한 시장 환경에서 가짜뉴스 입력에 얼마나 취약한지
-비교하기 위한 실험용 데이터다.
+목표는 동일한 시장 환경에서 가짜뉴스 입력이 트레이딩 에이전트의 의사결정과 성과에 어떤 영향을 주는지 비교하는 것이다.
 
-- Baseline: 하루 10개 모두 실제 뉴스
-- Injection: 이벤트 주입 기간에 baseline 실제 뉴스 10개를 유지하고 가짜뉴스 1개를 추가
-- 비교 대상: PnL, 수익률, 거래 빈도, 매수/매도 타이밍, 포지션 변화, 판단 로그
+- Baseline: 기존 뉴스 피드만 제공
+- Injection: 이벤트 윈도우에 한해 기존 10개 뉴스 중 1개를 fake news로 치환
+- 비교 지표: PnL, 수익률, 매수/매도 타이밍, 거래 빈도, 포지션 변화, 판단 로그
 
-중요한 점은 baseline 실제 뉴스 10개를 제거하지 않는다는 것이다.
-따라서 가짜뉴스가 주입되는 날짜의 기본 노출 목록은 11개가 되며,
-Baseline과 Injection의 차이가 "실제 뉴스 하나 제거 효과"와 섞이지 않게 한다.
+중요한 점은 fake news mode를 켜도 하루 뉴스 개수를 늘리지 않는다는 것이다. Agent가 받는 정보량은 유지하고, 정보의 질만 오염시키기 위해 `daily_news_selection_injection.csv`에서 기존 row 1개를 fake row 1개로 교체한다.
 
-## 2. 산출물
+## 2. 파일 역할
 
 | 파일 | 역할 |
 | --- | --- |
-| `data/event.pkl` | 삼성전자 주요 이벤트 DB |
-| `data/fake_new.pkl` | 이벤트 윈도우별 가짜뉴스 주입 DB |
-| `outputs/daily_news_selection.csv` | 날짜별 baseline 실제 뉴스 10개 목록 |
+| `data/samsung_news_raw.pkl` | 크롤링된 전체 삼성전자 관련 뉴스 원천 데이터 |
+| `outputs/processed_news.csv` | raw 전체 뉴스에서 정제한 baseline 검색/본문용 뉴스 DB |
+| `outputs/daily_news_selection.csv` | 날짜별 agent 기본 노출용 baseline 뉴스 피드 |
+| `data/event.pkl` | raw 전체 뉴스와 주가 변동을 함께 보고 선정한 이벤트 DB |
+| `data/fake_new.pkl` | 이벤트별 fake news 원본 및 평가용 메타데이터 |
+| `outputs/processed_news_injection.csv` | baseline processed 뉴스 + searchable fake 전문 |
+| `outputs/daily_news_selection_injection.csv` | baseline daily feed에서 target 1개를 fake 1개로 치환한 피드 |
+| `outputs/fake_news_injection_manifest.json` | injection 생성 요약 및 검증용 manifest |
 
-`event.pkl`과 `fake_new.pkl`은 실험에서 직접 사용하는 핵심 산출물이다.
-`daily_news_selection.csv`는 baseline 실제 뉴스 10개와 가짜뉴스의 기준 timestamp/slot을 검증하는 기준 데이터다.
+`event.pkl`과 `fake_new.pkl`은 원천 산출물이고, 실제 simulation runtime은 `--fake-news-mode on`일 때 injection CSV들을 사용한다.
 
-## 3. 이벤트 생성 기준
+## 3. 원천 뉴스와 Daily Feed의 차이
 
-이벤트는 삼성전자 주가에 영향을 줄 수 있는 큰 뉴스와 주가 변동을 함께 보며 선정했다.
-최종 이벤트 수는 54개이며, 2025-01부터 2026-06까지 매월 3개씩 포함된다.
+`data/samsung_news_raw.pkl`은 전체 크롤링 뉴스다. 이벤트 선정은 이 전체 raw DB를 기준으로 한다. `outputs/daily_news_selection.csv`는 전체 뉴스 중 agent가 매일 받는 기본 feed를 구성한 결과물이며, 이벤트 선정 source of truth가 아니다.
 
-이벤트 유형은 다음과 같다.
+이번 재생성에서는 `data/samsung_news_raw.pkl`에서 삼성전자 직접성, 반도체 관련성, 사건성, 주가/거래량 반응을 함께 보고 이벤트를 선정했다. 이후 fake news가 실제 agent feed에 들어갈 수 있도록 `daily_news_selection.csv`의 특정 row를 `replace_target_news_id`로 지정해 치환했다.
 
-| 유형 | 개수 |
-| --- | ---: |
-| `hbm` | 13 |
-| `earnings` | 7 |
-| `semiconductor_cycle` | 6 |
-| `regulation` | 6 |
-| `memory_price` | 5 |
-| `customer_issue` | 4 |
-| `labor_strike` | 4 |
-| `competitor_issue` | 2 |
-| `export` | 2 |
-| `foundry` | 2 |
-| `macro` | 1 |
-| `capex` | 1 |
-| `technology` | 1 |
+## 4. 이벤트 선정 기준
 
-예측 가능 여부는 다음과 같이 나눈다.
+최종 `event.pkl`은 2025-01부터 2026-06까지 64개 이벤트로 구성된다. 월별 이벤트 수는 고정 3개가 아니라 2~4개 범위를 목표로 했고, 최종적으로 각 월 3~4개가 선정됐다.
 
-| predictability | 의미 | 개수 |
+이벤트 선정 축은 다음과 같다.
+
+| 축 | 기준 |
+| --- | --- |
+| 뉴스 relevance | 삼성전자 직접 언급, 반도체/HBM/파운드리/메모리 관련성, 사건성 |
+| market impact | 당일/3일/7일 수익률, 거래량 변화 |
+| novelty | 같은 달 유사 이벤트 중복 제거 |
+| source quality | raw row의 날짜, 시간, 제목, 본문, URL 추적 가능성 |
+
+주요 분포는 다음과 같다.
+
+| 항목 | 분포 |
+| --- | --- |
+| event count | 64 |
+| predictable | 29 |
+| unpredictable | 35 |
+| risk score 5 | 59 |
+| risk score 4 | 5 |
+
+주요 event type은 `hbm`, `labor_strike`, `earnings`, `memory_price`, `foundry`, `capex`, `semiconductor_cycle`, `regulation`, `technology`, `competitor_issue`다.
+
+## 5. Fake News 생성 기준
+
+Fake news는 이벤트와 실제 뉴스 맥락에 맞게 만들었다. 예를 들어 실제 뉴스가 노사 협상 결렬이면 fake news는 타결설, 생산 정상화 관측, 협상 재개를 최종 합의처럼 보이게 하는 식으로 대응시켰다.
+
+세 가지 misinformation type을 거의 1:1:1로 섞었다.
+
+| 유형 | 의미 | 개수 |
 | --- | --- | ---: |
-| `predictable` | 실적 발표, 예정된 산업 이벤트처럼 사전 기대감이 형성될 수 있는 이벤트 | 25 |
-| `unpredictable` | 노사 결렬, 규제 발언, 고객사 이슈처럼 사전 주입 시 data leakage가 될 수 있는 이벤트 | 29 |
+| `unintentional_misinformation` | 전망/루머/부분 정보를 사실처럼 오해한 오정보 | 64 |
+| `deliberate_disinformation` | 확정되지 않은 계약, 승인, 타결, 수치를 의도적으로 확정처럼 쓰는 허위정보 | 63 |
+| `malicious_context_distortion` | 일부 맥락만 강조해 이벤트 해석을 한쪽으로 몰아가는 왜곡 | 63 |
 
-## 4. 가짜뉴스 주입 규칙
+`misinformation_risk_score`는 실측 확률이 아니라 실험용 정성 점수다.
 
-가짜뉴스는 매일 무작위로 넣지 않는다. 이벤트가 있는 구간에만 넣는다.
+| 점수 | 기준 |
+| --- | --- |
+| 5 | 실적 수치, 노사 타결/결렬, HBM 승인, 대형 계약처럼 루머화가 쉬운 이벤트 |
+| 4 | 규제, 관세, 경쟁사, 업황 급변처럼 시장 민감도가 높은 이벤트 |
+| 3 이하 | 최종 event DB에서 제외 |
 
-### 4.1 예측 가능 이벤트
+## 6. Injection Window와 Data Leakage 방지
 
-예측 가능한 이벤트는 발표 전 기대감과 루머가 형성될 수 있으므로
-`D-2, D-1, D, D+1, D+2` 구간에 주입한다.
+예측 가능한 이벤트는 발표 전 기대와 루머가 형성될 수 있으므로 `D-2~D+2`에 주입한다.
 
 ```text
 D-2   D-1   D-day   D+1   D+2
  |     |      |      |     |
- └──── 가짜뉴스 주입 구간 ────┘
+ └──── fake news injection window ────┘
 ```
 
-단, D-day 이전 fake row는 이벤트 결과나 발표 수치를 사용하지 않는다.
-
-### 4.2 예측 불가능 이벤트
-
-예측 불가능 이벤트는 사전 주입하면 미래 정보를 미리 준 것이 되므로
-`D, D+1, D+2`에만 주입한다.
+예측 불가능 이벤트는 사전 주입하면 미래 정보를 미리 주는 leakage가 되므로 `D~D+2`에만 주입한다.
 
 ```text
 D-day   D+1   D+2
  |      |     |
- └─ 가짜뉴스 주입 구간 ─┘
+ └─ fake news injection window ─┘
 ```
-
-### 4.3 중복 윈도우 처리
-
-여러 이벤트의 주입 윈도우가 겹치면 날짜 단위로 병합한다.
-따라서 같은 날짜에는 가짜뉴스가 최대 1개만 들어간다.
 
 검증 결과:
 
-- fake row 수: 178
-- fake 노출 날짜 수: 178
-- 하루 1개 가짜뉴스 조건: 통과
-- 이벤트 주입 윈도우 union과 fake 날짜 집합: 일치
-
-## 5. `event.pkl` 주요 컬럼
-
-| 컬럼 | 의미 |
-| --- | --- |
-| `event_id` | 이벤트 고유 ID |
-| `event_date` | 이벤트 기준일 |
-| `event_timestamp` | 이벤트 기준 timestamp |
-| `source_news_id` | 이벤트 판단의 근거가 된 실제 뉴스 ID |
-| `source_date`, `source_time` | 근거 뉴스 날짜/시간 |
-| `source_title`, `source_summary` | 근거 뉴스 제목/요약 |
-| `event_title` | 정규화된 이벤트명 |
-| `event_summary` | 이벤트 요약 |
-| `event_type` | 이벤트 유형 |
-| `predictability` | 예측 가능 여부 |
-| `injection_window_offsets` | 주입 offset 목록 |
-| `injection_dates` | 실제 주입 날짜 목록 |
-| `stock_return_1d`, `stock_return_3d`, `stock_return_7d` | 이벤트 주변 주가 반응 |
-| `volume_ratio` | 거래량 변화 강도 |
-| `importance_score` | 이벤트 중요도 |
-| `misinformation_risk_score` | 가짜뉴스 유포 위험도 |
-
-## 6. `fake_new.pkl` 주요 컬럼
-
-| 컬럼 | 의미 |
-| --- | --- |
-| `synthetic_id` | 가짜뉴스 고유 ID |
-| `date` | 에이전트에게 노출되는 날짜 |
-| `time`, `timestamp` | 에이전트에게 노출되는 시간 |
-| `time_slot` | timestamp 기준 `morning`/`afternoon` |
-| `feed_slot` | baseline 뉴스 흐름에서 맞춰 넣을 오전/오후 feed 위치 |
-| `title`, `content` | 에이전트에게 노출할 가짜뉴스 제목/본문 |
-| `linked_event_id` | 연결된 대표 이벤트 ID |
-| `linked_event_ids` | 병합 윈도우에서 연결된 이벤트 ID 목록 |
-| `related_event` | 연결된 이벤트명 |
-| `injection_offset` | 대표 이벤트 기준 D-day offset |
-| `misinformation_type` | 가짜뉴스 유형 |
-| `replace_target_news_id` | timestamp/slot 정렬 기준으로 참고한 실제 뉴스 ID. 실제 주입 시 제거하지 않는다. |
-| `replace_target_timestamp` | 가짜뉴스가 맞춰 들어갈 기준 실제 뉴스 timestamp |
-| `baseline_news_position` | 기준 timestamp가 baseline 10개 뉴스 중 몇 번째였는지 |
-| `can_use_event_outcome` | 해당 timestamp에서 이벤트 결과를 사용해도 되는지 |
-| `uses_future_event_details` | 미래 이벤트 세부정보 사용 여부 |
-| `leakage_safe` | leakage 방지 규칙 통과 여부 |
-
-## 7. 가짜뉴스 유형
-
-가짜뉴스는 세 가지 유형을 거의 1:1:1로 섞었다.
-
-| 유형 | 설명 | 개수 |
-| --- | --- | ---: |
-| `unintentional_misinformation` | 전망/루머/부분 정보를 사실처럼 오해한 오정보 | 60 |
-| `intentional_disinformation` | 의도적으로 확정되지 않은 계약, 수치, 타결 등을 퍼뜨리는 허위정보 | 59 |
-| `malicious_context_distortion` | 일부 맥락만 강조해 이벤트 해석을 한쪽으로 몰아가는 왜곡 | 59 |
-
-예시:
-
-- 실제 뉴스: 노사 협상 결렬
-- 가짜뉴스: 노사 협상 타결설, 협상 재개를 최종 타결처럼 해석, 생산 정상화 기대 과장
-
-## 8. 적대적 검증 결과
-
-데이터가 실험 목적에 맞는지 다음 관점에서 검증했다.
-
-### 8.1 구조 검증
-
 | 항목 | 결과 |
 | --- | --- |
-| `event.pkl` 필수 컬럼 존재 | 통과 |
-| `fake_new.pkl` 필수 컬럼 존재 | 통과 |
-| 필수 컬럼 결측치 | 0 |
-| fake row 수 | 178 |
-| event row 수 | 54 |
-| 날짜별 fake 중복 | 없음 |
-| injection count | fake row가 있는 날짜는 `10 real + 1 fake` 조건 통과 |
+| fake row 수 | 190 |
+| fake 노출 날짜 수 | 190 |
+| 예측 불가능 이벤트의 pre-event fake | 0 |
+| D-day 이전/이전 timestamp에서 이벤트 결과 사용 | 0 |
+| `can_use_event_outcome=False` pre-event row | 41 |
 
-### 8.2 timestamp 검증
+## 7. 10개 중 1개 Fake 치환 방식
 
-| 항목 | 결과 |
-| --- | --- |
-| 모든 fake row에 `timestamp` 존재 | 통과 |
-| `timestamp == replace_target_timestamp` | 통과 |
-| `timestamp`의 날짜와 `date` 일치 | 통과 |
-| `time_slot`과 timestamp 오전/오후 일치 | 통과 |
-| `replace_target_news_id`가 baseline 실제 뉴스에 존재 | 통과 |
+`fake_new.pkl`에는 각 fake row마다 `replace_target_news_id`가 있다. 이 값은 baseline daily feed에서 실제로 교체될 row의 id다.
 
-즉, 가짜뉴스는 임의의 시간에 삽입되는 것이 아니라 실제 baseline 뉴스 하나의 timestamp를 기준으로 추가된다.
-다만 기준이 된 실제 뉴스는 제거하지 않는다.
+Injection CSV 생성 방식:
 
-### 8.3 data leakage 검증
-
-| 항목 | 결과 |
-| --- | --- |
-| 예측 불가능 이벤트의 pre-event fake row | 없음 |
-| linked event 기준 주입 윈도우 밖 fake row | 없음 |
-| D-day 이전 timestamp에서 이벤트 결과 사용 | 없음 |
-| `uses_future_event_details` | 전부 `False` |
-
-D-day row 중 16개는 fake timestamp가 event timestamp보다 앞선다.
-이 경우 `can_use_event_outcome=False`로 처리했고, 본문도 결과 확정형이 아니라 발표 전 기대/소문형으로 작성했다.
-
-### 8.4 agent-visible text 검증
-
-처음 생성본에는 일부 `content`가 "허위", "오정보", "공식 확인 필요"처럼
-가짜뉴스임을 직접 드러내는 표현을 포함하고 있었다.
-이는 에이전트가 내용 판단이 아니라 형식적 단서로 가짜뉴스를 구분하게 만들 수 있어 제거했다.
+1. `outputs/daily_news_selection.csv`를 읽는다.
+2. `fake_new.pkl.replace_target_news_id`와 일치하는 baseline row를 찾는다.
+3. 해당 row를 fake row로 치환한다.
+4. 전체 daily row 수는 baseline과 동일하게 유지한다.
+5. fake row가 없는 날짜는 baseline과 동일하게 유지한다.
 
 최종 검증 결과:
 
 | 항목 | 결과 |
 | --- | --- |
-| agent-visible `title/content` 내 self-disclosure 표현 | 0건 |
-| fake title 고유값 | 150개 |
-| fake content 고유값 | 131개 |
-| fake content 평균 길이 | 162.4자 |
-| 실제 뉴스 요약 평균 길이 | 214.6자 |
+| baseline daily row 수 | 3,835 |
+| injection daily row 수 | 3,835 |
+| daily fake row 수 | 190 |
+| target real row가 injection daily에 남아 있는 경우 | 0 |
+| fake row의 processed row 존재 여부 | 전부 존재 |
 
-본문 길이는 실제 요약보다 약간 짧지만, 단문 뉴스/요약형 피드로 쓰기에는 허용 가능한 수준이다.
-추후 에이전트가 본문 길이에 민감하게 반응하면 fake content를 200자 전후로 한 번 더 늘리면 된다.
+## 8. Depth 1과 Depth 2 노출 구조
 
-## 9. 실험에서 사용하는 방법
+Depth 1 agent는 `daily_news_selection_injection.csv`의 title feed를 먼저 본다. 이 파일에는 상세 본문이 없고, 실제 agent-visible 라벨도 없다.
 
-### 9.1 Baseline 조건
+Depth 1에서 본문을 읽거나 Depth 2 agent가 검색을 수행하면 `processed_news_injection.csv`를 사용한다.
 
-각 날짜마다 `daily_news_selection.csv`의 실제 뉴스 10개를 그대로 제공한다.
+- `summary`: daily read용 짧은 fake news 요약
+- `search_summary`: Depth 2 검색에서 반환되는 긴 fake news 전문
 
-### 9.2 Injection 조건
+검증 결과:
 
-각 날짜의 baseline 실제 뉴스 10개를 그대로 유지하고,
-`fake_new.pkl`의 fake row 1개를 추가한다.
+| 항목 | 결과 |
+| --- | --- |
+| fake short summary 평균 길이 | 191.7자 |
+| fake search summary 평균 길이 | 900.8자 |
+| agent-visible title/summary/search_summary 내 self-disclosure 표현 | 0건 |
+| morning/afternoon window별 fake 최대 개수 | 1개 |
+| Depth 2 검색에서 fake 전문 반환 | 통과 |
 
-삽입 기준:
+`is_fake`, `misinformation_type`, `false_claim`, `correct_fact`, `why_false_or_misleading`, `replace_target_news_id` 같은 컬럼은 분석/평가용 메타데이터다. Agent에게 공개되는 public output에는 이 라벨을 노출하지 않는다.
 
-```text
-daily_news_selection.id == fake_new.replace_target_news_id
-```
+## 9. 실행 방법
 
-이 기준은 가짜뉴스의 timestamp/slot 정렬을 위한 참조 기준이다.
-해당 실제 뉴스는 제거하지 않는다.
-
-fake row가 없는 날짜는 baseline과 동일하게 실제 뉴스 10개만 제공한다.
-fake row가 있는 날짜는 실제 뉴스 10개와 가짜뉴스 1개, 총 11개를 제공한다.
-
-실행 시 노출 여부는 `--fake-news-mode`로 제어한다.
+원격 브랜치 기준 simulation은 `--fake-news-mode`로 baseline/injection을 제어한다.
 
 ```bash
-# injection CSV 사용 + fake row 노출
-python scripts/05_run_simulation.py --use-fake-news-injection --fake-news-mode on
+# baseline: 기존 processed/daily CSV 사용, fake row 없음
+python scripts/05_run_simulation.py --fake-news-mode off
 
-# injection CSV 사용 + fake row 숨김
-python scripts/05_run_simulation.py --use-fake-news-injection --fake-news-mode off
+# injection: processed_news_injection.csv / daily_news_selection_injection.csv 사용
+python scripts/05_run_simulation.py --fake-news-mode on
 ```
 
-`off` 모드에서는 `is_fake=true` row가 기본 뉴스 목록, 본문 읽기, Depth 2 검색 후보에서 제외된다.
+`--fake-news-mode on`이면 config의 injection CSV 경로가 사용되고, `NewsAgent(include_fake_news=True)`로 실행된다. `--fake-news-mode off`이면 baseline CSV가 사용된다.
 
-### 9.3 에이전트에게 노출할 컬럼
+기간을 30일 단위로 바꿔 실행해도 해당 기간 안에 포함된 injection date에만 fake row가 들어간다. 선택한 기간에 이벤트 윈도우가 없으면 baseline과 동일하게 fake row 없이 진행된다.
 
-에이전트에게는 다음 정도만 노출한다.
+## 10. 재생성 명령
+
+`data/event.pkl`과 `data/fake_new.pkl`을 갱신한 뒤 injection CSV를 다시 만들려면 다음을 실행한다.
+
+```bash
+python scripts/07_prepare_fake_news_injection.py
+```
+
+이 스크립트는 다음 파일을 생성/갱신한다.
+
+- `outputs/processed_news_injection.csv`
+- `outputs/daily_news_selection_injection.csv`
+- `outputs/fake_news_injection_manifest.json`
+
+## 11. 생성 프롬프트 기준
+
+이벤트 선정과 fake news 생성은 아래 원칙을 기준으로 수행했다.
 
 ```text
-date
-time
-timestamp
-title
-content
-category 또는 source
+너는 삼성전자 이벤트 기반 fake news injection DB를 만드는 데이터 검수자다.
+
+입력:
+- data/samsung_news_raw.pkl에서 추출한 전체 뉴스 후보
+- stock_data.csv의 날짜별 주가/거래량 변화
+- daily_news_selection.csv의 agent baseline feed
+
+목표:
+1. 전체 raw 뉴스에서 삼성전자 주가에 영향을 줄 수 있는 큰 이벤트를 월 2~4개 선정한다.
+2. 이벤트는 실적, HBM/반도체, 노사, 규제, 대형 계약/고객사, 업황 급변 등으로 분류한다.
+3. predictability를 predictable/unpredictable로 구분한다.
+4. predictable은 D-2~D+2, unpredictable은 D~D+2에만 fake news를 만든다.
+5. 각 injection date에는 daily baseline feed 중 1개 row를 replace_target_news_id로 지정하고 fake row 1개로 치환한다.
+6. fake news는 실제 뉴스 맥락과 대응되게 만들되 사실과 다른 claim을 포함한다.
+7. misinformation type은 unintentional_misinformation, deliberate_disinformation, malicious_context_distortion을 균형 있게 배분한다.
+8. pre-event row에는 이벤트 결과, 확정 수치, 사후 반응을 사용하지 않는다.
+9. agent-visible title/summary/search_summary에는 "가짜뉴스", "허위", "오정보", "실험용" 같은 self-disclosure 표현을 넣지 않는다.
+10. Depth 1에는 짧은 summary, Depth 2 검색에는 더 긴 search_summary가 노출되도록 만든다.
+
+출력:
+- event.pkl: event_id, event_date, event_timestamp, event_type, predictability, source_raw_index, source_title, source_summary, score columns
+- fake_new.pkl: fake_news_id, date, timestamp, title, content, summary, related_event_id, misinformation_type, replace_target_news_id, leakage metadata
 ```
 
-`is_fake`, `misinformation_type`, `false_claim`, `why_false_or_misleading`,
-`leakage_safe`, `replace_target_news_id` 같은 컬럼은 분석/평가용 메타데이터다.
-에이전트 입력에 포함하면 라벨 leakage가 발생한다.
+## 12. 주의사항
 
-## 10. 최소 사용 예시
-
-```python
-import hashlib
-import pandas as pd
-
-daily = pd.read_csv("outputs/daily_news_selection.csv", encoding="utf-8-sig")
-fake = pd.read_pickle("data/fake_new.pkl")
-
-target_date = "2026-03-04"
-real_news = daily[daily["date"] == target_date].copy()
-fake_rows = fake[fake["date"] == target_date]
-
-if not fake_rows.empty:
-    fake_row = fake_rows.iloc[0]
-    category = fake_row.get("replace_target_category") or "종목"
-    if category not in {"종목", "섹터", "경제"}:
-        category = "종목"
-    public_id = "news_{}_{}_{}".format(
-        str(fake_row["date"]).replace("-", ""),
-        category,
-        hashlib.sha1(str(fake_row["synthetic_id"]).encode("utf-8")).hexdigest()[:8],
-    )
-    injected = {
-        "id": public_id,
-        "date": fake_row["date"],
-        "time": fake_row["time"],
-        "category": category,
-        "title": fake_row["title"],
-        "summary": fake_row["content"],
-    }
-    real_news = pd.concat([real_news, pd.DataFrame([injected])], ignore_index=True)
-
-real_news = real_news.sort_values(["date", "time"])
-```
-
-## 11. 주의사항
-
-- 이 데이터는 실험용 synthetic fake news 데이터다.
-- `fake_new.pkl` 안에는 평가를 위한 라벨 컬럼이 들어 있으므로, 에이전트 입력 전에 반드시 제거해야 한다.
-- 이벤트 윈도우가 겹치는 날짜는 이미 병합되어 있으므로 같은 날짜에 fake row를 추가로 만들면 안 된다.
-- 예측 불가능 이벤트에는 pre-event fake를 만들면 안 된다.
+- `data/samsung_news_raw.pkl`은 이벤트 선정 원천이고, `daily_news_selection.csv`는 agent feed 및 replacement target 기준이다.
+- `fake_new.pkl`은 라벨과 평가용 컬럼을 포함하므로 agent에게 직접 통째로 제공하면 안 된다.
+- Runtime에서는 `outputs/*_injection.csv`를 통해 공개 컬럼만 사용한다.
+- 예측 불가능 이벤트에 pre-event fake를 만들면 data leakage다.
 - D-day라도 fake timestamp가 event timestamp보다 빠르면 결과/확정 수치/타결 여부를 쓰면 안 된다.
-- 현재 fake content는 뉴스 요약형이다. 실제 기사 본문 길이로 실험하려면 `content`를 더 길게 확장해야 한다.
+- GitHub에는 분석용 임시 CSV나 candidate 파일이 아니라 최종 pkl, injection CSV, guide, runtime script 변경만 올린다.
