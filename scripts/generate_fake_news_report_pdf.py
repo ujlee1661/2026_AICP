@@ -113,6 +113,12 @@ def action_of(row: dict[str, Any]) -> str:
     return str(row.get("action") or row.get("direction") or "").lower()
 
 
+def report_dir_for_run(run_id: str) -> Path:
+    match = re.search(r"(20\d{6})", run_id)
+    folder = match.group(1) if match else "unknown_date"
+    return REPORT_DIR / folder
+
+
 def quantity_of(row: dict[str, Any]) -> float:
     return num(row.get("quantity") or row.get("executed_quantity") or row.get("filled_quantity"))
 
@@ -573,6 +579,56 @@ def exposure_tables(exposures: list[dict[str, Any]]) -> dict[str, list[dict[str,
     return {"by_news": news_rows, "by_agent": agent_rows}
 
 
+def fake_news_seen_contents(run: dict[str, Any], exposures: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    processed_raw = str(run["meta"].get("processed_news_csv") or "")
+    if not processed_raw:
+        return []
+    processed_path = Path(processed_raw)
+    if not processed_path.is_file():
+        return []
+    news_by_id = {row.get("id"): row for row in read_csv(processed_path)}
+    rows: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str, str, str, str]] = set()
+    for exposure in exposures:
+        fake_public_id = str(exposure.get("fake_public_id") or "")
+        if not fake_public_id:
+            continue
+        key = (
+            str(exposure.get("date") or ""),
+            str(exposure.get("turn") or ""),
+            str(exposure.get("subturn") or ""),
+            str(exposure.get("agent_id") or ""),
+            fake_public_id,
+        )
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        news = news_by_id.get(fake_public_id, {})
+        rows.append(
+            {
+                "run_id": exposure.get("run_id"),
+                "date": exposure.get("date"),
+                "turn": exposure.get("turn"),
+                "subturn": exposure.get("subturn"),
+                "agent_id": exposure.get("agent_id"),
+                "news_depth": exposure.get("news_depth"),
+                "fake_public_id": fake_public_id,
+                "fake_synthetic_id": exposure.get("fake_synthetic_id") or news.get("synthetic_id"),
+                "title": news.get("title") or exposure.get("fake_title"),
+                "body_seen_by_agent": news.get("summary"),
+                "misinformation_type": news.get("misinformation_type") or exposure.get("misinformation_type"),
+                "false_claim": news.get("false_claim"),
+                "correct_fact": news.get("correct_fact"),
+                "why_false_or_misleading": news.get("why_false_or_misleading"),
+                "sources": exposure.get("sources"),
+                "selected_by_agent": exposure.get("selected_by_agent"),
+                "action": exposure.get("action"),
+                "quantity": exposure.get("quantity"),
+            }
+        )
+    return rows
+
+
 def build_story(
     *,
     fake_run: dict[str, Any],
@@ -730,6 +786,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=None, help="Output PDF path.")
     parser.add_argument("--summary-json", type=Path, default=None, help="Optional summary JSON path.")
     parser.add_argument("--exposure-csv", type=Path, default=None, help="Optional fake exposure CSV path.")
+    parser.add_argument("--seen-contents-csv", type=Path, default=None, help="Optional fake news title/body CSV path.")
     parser.add_argument("--max-rows", type=int, default=40, help="Maximum detail rows per section.")
     return parser.parse_args()
 
@@ -750,11 +807,12 @@ def main() -> None:
     output = args.output
     if output is None:
         run_id = summary["run_id"] or args.run_dir.name
-        output = REPORT_DIR / f"fake_news_impact_{run_id}.pdf"
+        output = report_dir_for_run(run_id) / f"{run_id}_fake_news_report.pdf"
     output.parent.mkdir(parents=True, exist_ok=True)
 
     summary_json = args.summary_json or output.with_suffix(".summary.json")
     exposure_csv = args.exposure_csv or output.with_suffix(".exposures.csv")
+    seen_contents_csv = args.seen_contents_csv or output.with_suffix(".seen_contents.csv")
 
     payload = {
         "summary": summary,
@@ -790,6 +848,30 @@ def main() -> None:
             "decision_reason",
         ],
     )
+    write_csv(
+        seen_contents_csv,
+        fake_news_seen_contents(fake_run, exposures),
+        [
+            "run_id",
+            "date",
+            "turn",
+            "subturn",
+            "agent_id",
+            "news_depth",
+            "fake_public_id",
+            "fake_synthetic_id",
+            "title",
+            "body_seen_by_agent",
+            "misinformation_type",
+            "false_claim",
+            "correct_fact",
+            "why_false_or_misleading",
+            "sources",
+            "selected_by_agent",
+            "action",
+            "quantity",
+        ],
+    )
 
     story = build_story(
         fake_run=fake_run,
@@ -815,6 +897,7 @@ def main() -> None:
     print(f"report={output}")
     print(f"summary_json={summary_json}")
     print(f"exposure_csv={exposure_csv}")
+    print(f"seen_contents_csv={seen_contents_csv}")
 
 
 if __name__ == "__main__":

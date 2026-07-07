@@ -110,6 +110,83 @@ def parse_decision_json(content: str, constraints: dict[str, Any] | None = None)
     }
 
 
+def _fallback_decision(
+    invalid_decision: dict[str, Any],
+    constraints: dict[str, Any],
+) -> dict[str, Any]:
+    allowed_actions = list(constraints.get("allowed_actions") or [])
+    min_order_unit = int(constraints.get("min_order_unit") or 1)
+    max_buy_quantity = int(constraints.get("max_buy_quantity") or 0)
+    max_sell_quantity = int(constraints.get("max_sell_quantity") or 0)
+    current_price = float(constraints.get("current_price") or 0)
+    invalid_errors = invalid_decision.get("validation_errors") or []
+    invalid_action = str(invalid_decision.get("action") or "").lower()
+
+    if invalid_action in allowed_actions:
+        action = invalid_action
+    elif "sell" in allowed_actions and max_sell_quantity >= min_order_unit:
+        action = "sell"
+    elif "buy" in allowed_actions and max_buy_quantity >= min_order_unit:
+        action = "buy"
+    elif allowed_actions:
+        action = allowed_actions[0]
+    else:
+        return {
+            "action": "hold",
+            "quantity": 0,
+            "order_type": "announced_price",
+            "price": 0,
+            "reason": "fallback_decision_after_invalid_llm_output: no allowed buy/sell action was available.",
+            "risk_control": "No order was submitted because trading constraints allowed neither buy nor sell.",
+            "order_corrections": ["fallback_decision_after_invalid_llm_output", "no_allowed_actions"],
+            "validation_errors": [],
+            "original_validation_errors": invalid_errors,
+            "valid": True,
+        }
+
+    if action == "buy":
+        max_quantity = max_buy_quantity
+    else:
+        max_quantity = max_sell_quantity
+    quantity = min_order_unit if max_quantity >= min_order_unit else max(0, max_quantity)
+
+    if quantity < min_order_unit:
+        return {
+            "action": "hold",
+            "quantity": 0,
+            "order_type": "announced_price",
+            "price": 0,
+            "reason": (
+                "fallback_decision_after_invalid_llm_output: selected action had no valid "
+                "minimum tradable quantity."
+            ),
+            "risk_control": "No order was submitted because the minimum order quantity could not be satisfied.",
+            "order_corrections": ["fallback_decision_after_invalid_llm_output", "quantity_below_min_after_fallback"],
+            "validation_errors": [],
+            "original_validation_errors": invalid_errors,
+            "valid": True,
+        }
+
+    return {
+        "action": action,
+        "quantity": quantity,
+        "order_type": "announced_price",
+        "price": current_price,
+        "reason": (
+            "fallback_decision_after_invalid_llm_output: the model failed to return a valid "
+            f"decision after retry, so the system submitted a minimal valid {action} order."
+        ),
+        "risk_control": (
+            "Fallback used the minimum tradable quantity to keep the simulation running while "
+            "limiting unintended portfolio impact."
+        ),
+        "order_corrections": ["fallback_decision_after_invalid_llm_output"],
+        "validation_errors": [],
+        "original_validation_errors": invalid_errors,
+        "valid": True,
+    }
+
+
 async def make_decision(
     agent: dict[str, Any],
     today_belief: dict[str, Any],
@@ -149,7 +226,10 @@ async def make_decision(
         prompt
         + "\n\n이전 응답은 거래 제약을 위반했습니다. "
         + f"위반 항목: {decision.get('validation_errors')}. "
-        + "action은 allowed_actions 안에서만 고르고, quantity는 허용된 최대 수량 이하로 다시 JSON만 출력하세요."
+        + "설명하지 말고 JSON만 출력하세요. "
+        + "action은 반드시 allowed_actions 안의 값 하나여야 하며 빈 문자열, null, hold는 금지입니다. "
+        + "quantity는 반드시 1 이상의 정수이고 허용된 최대 수량 이하여야 합니다. "
+        + "판단이 어렵다면 allowed_actions의 첫 번째 action과 quantity 1을 사용하세요."
     )
     response = await client.chat(
         [{"role": "user", "content": retry_prompt}],
@@ -158,5 +238,5 @@ async def make_decision(
     )
     decision = parse_decision_json(response_content(response) or "{}", trading_constraints)
     if not decision.get("valid"):
-        raise ValueError(f"invalid decision after retry: {decision.get('validation_errors')}")
+        return _fallback_decision(decision, trading_constraints)
     return decision

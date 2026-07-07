@@ -3,7 +3,7 @@
   "daily_csv": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/outputs/daily_news_selection_injection.csv",
   "baseline_processed_csv": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/outputs/processed_news.csv",
   "baseline_daily_csv": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/outputs/daily_news_selection.csv",
-  "fake_pkl": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/data/fake_new.pkl",
+  "fake_pkl": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/data/fake_news.pkl",
   "event_pkl": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/data/event.pkl",
   "baseline_processed_count": 19542,
   "baseline_daily_count": 3835,

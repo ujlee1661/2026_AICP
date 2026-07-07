@@ -18,11 +18,8 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
-    KeepTogether,
-    PageBreak,
     Paragraph,
     SimpleDocTemplate,
-    Spacer,
     Table,
     TableStyle,
 )
@@ -33,7 +30,7 @@ from report_common import pick_representative_agents
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUN_DIR = PROJECT_ROOT / "outputs" / "logs" / "current"
 REPORT_DIR = PROJECT_ROOT / "outputs" / "reports"
-REPORT_PATH = REPORT_DIR / "current_report.pdf"
+REPORT_PATH: Path | None = None
 SYS_100_DB = PROJECT_ROOT / "outputs" / "sys_100.db"
 FONT_PATHS = [
     Path("/System/Library/Fonts/Supplemental/AppleGothic.ttf"),
@@ -105,6 +102,12 @@ def row_agent_id(row: dict[str, Any]) -> str:
     return str(row.get("agent_id") or row.get("user_id") or "")
 
 
+def report_dir_for_run(run_id: str) -> Path:
+    match = re.search(r"(20\d{6})", run_id)
+    folder = match.group(1) if match else "unknown_date"
+    return REPORT_DIR / folder
+
+
 def row_action(row: dict[str, Any]) -> str:
     return str(row.get("action") or row.get("direction") or "").lower()
 
@@ -117,54 +120,12 @@ def row_close(row: dict[str, Any]) -> float:
     return num(row.get("close_price") or row.get("closing_price") or row.get("announced_price"))
 
 
+def pct_points(value: Any) -> str:
+    return f"{num(value) * 100:+.2f}pp"
+
+
 def order_price_text(row: dict[str, Any]) -> str:
     return money(row.get("announced_price") or row.get("price") or row.get("executed_price"))
-
-
-def fill_result_text(fills: list[dict[str, Any]]) -> str:
-    if not fills:
-        return "미체결"
-    return " / ".join(
-        f"{int(row_quantity(fill)):,}주@{money(fill.get('executed_price'))}"
-        for fill in fills
-    )
-
-
-def order_book_rows(
-    date: str,
-    orders_by_date: dict[str, list[dict[str, str]]],
-    fills_by_order: dict[tuple[str, str, str], list[dict[str, str]]],
-) -> list[list[str]]:
-    day_orders = orders_by_date.get(date, [])
-    sells = [row for row in day_orders if row_action(row) == "sell"]
-    buys = [row for row in day_orders if row_action(row) == "buy"]
-
-    def sell_key(row: dict[str, str]) -> tuple[int, float, str]:
-        return (0, num(row.get("price") or row.get("announced_price")), row.get("agent_id", ""))
-
-    def buy_key(row: dict[str, str]) -> tuple[int, float, str]:
-        return (0, -num(row.get("price") or row.get("announced_price")), row.get("agent_id", ""))
-
-    sells.sort(key=sell_key)
-    buys.sort(key=buy_key)
-    row_count = max(len(sells), len(buys), 1)
-    rows = [["매도 주문", "공시가", "매도 체결", "공시가", "매수 주문", "매수 체결"]]
-    for idx in range(row_count):
-        sell = sells[idx] if idx < len(sells) else None
-        buy = buys[idx] if idx < len(buys) else None
-        sell_fills = fills_by_order.get((date, sell["agent_id"], "sell"), []) if sell else []
-        buy_fills = fills_by_order.get((date, buy["agent_id"], "buy"), []) if buy else []
-        rows.append(
-            [
-                f"{sell['agent_id']} {int(num(sell.get('quantity'))):,}주" if sell else "",
-                order_price_text(sell) if sell else "",
-                fill_result_text(sell_fills) if sell else "",
-                order_price_text(buy) if buy else "",
-                f"{buy['agent_id']} {int(num(buy.get('quantity'))):,}주" if buy else "",
-                fill_result_text(buy_fills) if buy else "",
-            ]
-        )
-    return rows
 
 
 def para(text: Any, style: ParagraphStyle) -> Paragraph:
@@ -248,15 +209,13 @@ def main() -> None:
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", type=Path, default=RUN_DIR)
-    parser.add_argument("--output", type=Path, default=REPORT_PATH)
+    parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--representative-agents", type=int, default=4)
     args = parser.parse_args()
 
     RUN_DIR = args.run_dir
-    REPORT_PATH = args.output
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     font = register_font()
 
     styles = getSampleStyleSheet()
@@ -318,6 +277,9 @@ def main() -> None:
     )
 
     meta = load_json("run_metadata.json")
+    run_id = str(meta.get("run_id") or RUN_DIR.name)
+    REPORT_PATH = args.output or report_dir_for_run(run_id) / f"{run_id}_report.pdf"
+    REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     complete = load_json("run_complete.json")
     agent_rows = load_csv("agent_turns.csv")
     daily_rows = load_csv("daily_exchange_summary.csv")
@@ -343,13 +305,10 @@ def main() -> None:
 
     fills_by_date = defaultdict(list)
     fills_by_agent = defaultdict(list)
-    fills_by_order = defaultdict(list)
     for row in fill_rows:
         fills_by_date[row["date"]].append(row)
         aid = row_agent_id(row)
         fills_by_agent[aid].append(row)
-        if aid != "INSTITUTIONAL":
-            fills_by_order[(row["date"], aid, row_action(row))].append(row)
 
     orders_by_date = defaultdict(list)
     for row in order_rows:
@@ -367,12 +326,6 @@ def main() -> None:
         community_interactions=community_interactions,
         limit=args.representative_agents,
     )
-    representative_agent_set = set(representative_agents)
-    representative_orders_by_date = defaultdict(list)
-    for row in order_rows:
-        if row.get("agent_id") in representative_agent_set:
-            representative_orders_by_date[row["date"]].append(row)
-
     story: list[Any] = []
     story.append(para("TwinMarket Korea 시뮬레이션 실행 결과 보고서", styles["KTitle"]))
     story.append(
@@ -447,6 +400,7 @@ def main() -> None:
 
     story.append(para("2. 일자별 전체 거래 현황", styles["KHeading1"]))
     daily_table = [["일자", "종가", "주문", "체결", "순방향", "판단 분포", "해석"]]
+    daily_insights: list[dict[str, Any]] = []
     for row in daily_rows:
         date = row["date"]
         turns = by_date[date]
@@ -465,6 +419,21 @@ def main() -> None:
             net_text = "중립"
         sentiments = Counter(t["news_interpretation"].get("news_sentiment", "") for t in turns)
         main_sentiment = sentiments.most_common(1)[0][0] if sentiments else ""
+        market = turns[0]["context"]["market_features"] if turns else {}
+        daily_insights.append(
+            {
+                "date": date,
+                "turn": row.get("turn"),
+                "close": row_close(row),
+                "pct_chg": num(market.get("pct_chg")),
+                "net_qty": net_qty,
+                "buy_count": counts.get("buy", 0),
+                "sell_count": counts.get("sell", 0),
+                "hold_count": counts.get("hold", 0),
+                "main_sentiment": main_sentiment,
+                "turns": turns,
+            }
+        )
         note = (
             f"뉴스 감성은 {main_sentiment} 중심. "
             f"주문은 매수 {order_counts.get('buy', 0)}건, 매도 {order_counts.get('sell', 0)}건. "
@@ -488,140 +457,80 @@ def main() -> None:
         )
     story.append(table([[para(c, styles["KSmall"]) for c in row] for row in daily_table], [20 * mm, 20 * mm, 25 * mm, 23 * mm, 22 * mm, 34 * mm, 34 * mm]))
 
-    story.append(para("3. 일자별 대표 에이전트 상세 분석", styles["KHeading1"]))
-    for day in daily_rows:
-        date = day["date"]
-        rows = by_date[date]
-        fills = fills_by_date.get(date, [])
-        story.append(para(f"{date} / Turn {day['turn']}", styles["KHeading2"]))
-        agent_fills = [fill for fill in fills if row_agent_id(fill) != "INSTITUTIONAL"]
-        buy_qty = sum(int(row_quantity(fill)) for fill in agent_fills if row_action(fill) == "buy")
-        sell_qty = sum(int(row_quantity(fill)) for fill in agent_fills if row_action(fill) == "sell")
-        net_qty = buy_qty - sell_qty
-        net_text = "중립"
-        if net_qty > 0:
-            net_text = f"LLM 순매수 {net_qty:,}주"
-        elif net_qty < 0:
-            net_text = f"LLM 순매도 {abs(net_qty):,}주"
-        market = rows[0]["context"]["market_features"]
-        context_meta = rows[0]["context"]
-        story.append(
-            para(
-                f"정보 기준: decision_date={context_meta.get('decision_date', date)}, "
-                f"market_features_date={context_meta.get('market_features_date', date)}, "
-                f"news_start={context_meta.get('news_start_date') or ''} {context_meta.get('news_start_time') or ''}, "
-                f"news_max_date={context_meta.get('news_max_date', date)}, "
-                f"news_end_time={context_meta.get('news_end_time') or ''}, "
-                f"execution_date={context_meta.get('execution_date', date)}. "
-                f"시장 지표: 기준 종가 {money(market.get('close'))}, 실행 종가 {money(row_close(day))}, 등락률 {pct(market.get('pct_chg'))}, "
-                f"MA5 {money(market.get('ma5'))}, MA20 {money(market.get('ma20'))}. "
-                f"당일 주문 {day['submitted_orders']}건, 체결량 {int(num(day['volume'])):,}주, "
-                f"LLM 매수 체결 {buy_qty:,}주 / 매도 체결 {sell_qty:,}주 / {net_text}.",
-                styles["KBody"],
-            )
-        )
-        story.append(para("대표 에이전트 주문장", styles["KHeading2"]))
-        book_rows = order_book_rows(date, representative_orders_by_date, fills_by_order)
-        story.append(
-            table(
-                [[para(c, styles["KSmall"]) for c in row] for row in book_rows],
-                [30 * mm, 24 * mm, 30 * mm, 24 * mm, 30 * mm, 30 * mm],
-            )
-        )
-        news_titles = []
-        for turn in rows:
-            for item in turn["context"]["news_context"].get("read_contents", []):
-                if item.get("title") not in news_titles:
-                    news_titles.append(item.get("title"))
-        story.append(para("주요 확인 뉴스: " + " / ".join(short(t, 70) for t in news_titles[:6]), styles["KBody"]))
+    story.append(para("3. 핵심 관찰", styles["KHeading1"]))
+    returns = [
+        (agent_id, num(final_states.get(agent_id, {}).get("return_rate_marked_final")))
+        for agent_id in meta["agent_ids"]
+        if agent_id in final_states
+    ]
+    returns.sort(key=lambda item: item[1])
+    best = returns[-1] if returns else ("-", 0)
+    worst = returns[0] if returns else ("-", 0)
+    net_total = sum(item["net_qty"] for item in daily_insights)
+    buy_bias_days = sum(1 for item in daily_insights if item["buy_count"] > item["sell_count"])
+    sell_bias_days = sum(1 for item in daily_insights if item["sell_count"] > item["buy_count"])
+    fallback_count = sum(
+        1
+        for row in agent_rows
+        if "fallback_decision_after_invalid_llm_output" in str(row.get("order_corrections") or "")
+    )
+    observation_rows = [
+        ["관찰 포인트", "분석"],
+        [
+            "성과 분산",
+            f"최고 {best[0]} {pct(best[1])}, 최저 {worst[0]} {pct(worst[1])}. "
+            f"단순 평균보다 상하위 격차가 행동 차이를 설명하는 핵심 신호다.",
+        ],
+        [
+            "집단 방향성",
+            f"전체 체결 기준 {'순매수' if net_total > 0 else '순매도' if net_total < 0 else '중립'} {abs(net_total):,.0f}주. "
+            f"매수 우위일 {buy_bias_days}회, 매도 우위일 {sell_bias_days}회로 판단 쏠림을 확인했다.",
+        ],
+        [
+            "모델 안정성",
+            f"의사결정 폴백 {fallback_count}건. 이 값이 늘면 투자 행동 분석보다 모델 출력 안정성 이슈가 결과를 오염시킬 수 있다.",
+        ],
+    ]
+    story.append(table([[para(c, styles["KSmall"]) for c in row] for row in observation_rows], [38 * mm, 132 * mm]))
 
-        representative_rows = [turn for turn in rows if turn["agent"]["agent_id"] in representative_agent_set]
-        detail_data = [["에이전트", "선정 기준", "생각 변화", "시장/뉴스 해석", "판단 및 이유"]]
-        for turn in representative_rows:
-            decision = turn["decision"]
-            belief = turn["belief"]
-            analysis = turn["market_analysis"]
-            interp = turn["news_interpretation"]
-            decision_text = (
-                f"{action_ko(decision['action'])} {int(num(decision.get('quantity'))):,}주"
-                if decision["action"] != "hold"
-                else "보유"
-            )
-            if decision["action"] != "hold":
-                if decision.get("price"):
-                    decision_text += f" / {money(decision.get('price'))}"
-            decision_text += f": {short(decision.get('reason'), 260)}"
-            detail_data.append(
-                [
-                    f"{turn['agent']['agent_id']}\n{turn['agent']['strategy']} / {turn['agent']['age']}세",
-                    representative_reasons.get(turn["agent"]["agent_id"], ""),
-                    short(belief.get("belief_summary"), 260) + "\n변화: " + short(belief.get("view_change"), 180),
-                    f"뉴스 감성: {interp.get('news_sentiment')} / {short(interp.get('persona_interpretation'), 210)}\n"
-                    f"시장: {short(analysis.get('market_view'), 170)}",
-                    decision_text,
-                ]
-            )
-        story.append(table([[para(c, styles["KSmall"]) for c in row] for row in detail_data], [20 * mm, 26 * mm, 43 * mm, 43 * mm, 38 * mm]))
-
-    story.append(PageBreak())
-    story.append(para(f"4. 대표 에이전트별 {meta['date_count']}거래일 사고 흐름 및 최종 상태", styles["KHeading1"]))
-    for agent_id in representative_agents:
-        rows = by_agent[agent_id]
-        profile = rows[0]["agent"]
-        state = final_states.get(agent_id, {})
-        positions = state.get("positions") or []
-        pos_text = "보유 종목 없음"
-        if positions:
-            pos = positions[0]
-            pos_text = f"{pos['stock_code']} {int(pos.get('quantity') or 0):,}주, 평균단가 {money(pos.get('avg_cost'))}, 최종 평가가 {money(final_close)}"
-        story.append(
-            KeepTogether(
-                [
-                    para(
-                        f"{agent_id} ({profile['gender']}, {profile['age']}세, 전략={profile['strategy']})",
-                        styles["KHeading2"],
-                    ),
-                    para(
-                        f"최종 상태: 현금 {money(state.get('cash'))}, {pos_text}, "
-                        f"최종 평가 총자산 {money(state.get('total_value_marked_final'))}, "
-                        f"최종 평가 수익률 {pct(state.get('return_rate_marked_final'))}.",
-                        styles["KBody"],
-                    ),
-                ]
-            )
+    story.append(para("4. 변곡일 분석", styles["KHeading1"]))
+    pivot_days = sorted(
+        daily_insights,
+        key=lambda item: (abs(item["net_qty"]), abs(item["pct_chg"])),
+        reverse=True,
+    )[: min(5, len(daily_insights))]
+    pivot_rows = [["일자", "가격/변동", "집단 행동", "핵심 뉴스/해석", "왜 중요한가"]]
+    for item in pivot_days:
+        news_titles: list[str] = []
+        for turn in item["turns"]:
+            for news in turn["context"]["news_context"].get("read_contents", []):
+                title = news.get("title")
+                if title and title not in news_titles:
+                    news_titles.append(title)
+        if item["net_qty"] > 0:
+            net_text = f"순매수 {item['net_qty']:,}주"
+        elif item["net_qty"] < 0:
+            net_text = f"순매도 {abs(item['net_qty']):,}주"
+        else:
+            net_text = "중립"
+        if item["buy_count"] > item["sell_count"]:
+            meaning = "가격/뉴스 충격을 매수 기회로 해석한 날이다."
+        elif item["sell_count"] > item["buy_count"]:
+            meaning = "리스크 관리가 성장 기대보다 우선한 날이다."
+        else:
+            meaning = "의견이 갈려 에이전트 성향 차이가 드러난 날이다."
+        pivot_rows.append(
+            [
+                str(item["date"]),
+                f"{money(item['close'])}\n{pct_points(item['pct_chg'])}",
+                f"{net_text}\n매수 {item['buy_count']} / 매도 {item['sell_count']} / 보유 {item['hold_count']}",
+                f"감성 {item['main_sentiment']}\n" + short(" / ".join(news_titles[:3]), 190),
+                meaning,
+            ]
         )
-        flow = [["일자", "관점/생각", "판단", "결과"]]
-        for turn in rows:
-            decision = turn["decision"]
-            action = action_ko(decision["action"])
-            qty = int(num(decision.get("quantity")))
-            order_desc = "주문 없음"
-            result = "미체결/주문 없음"
-            matched = [f for f in fills_by_agent.get(agent_id, []) if f["date"] == turn["date"]]
-            if decision["action"] == "hold":
-                order_desc = "보유"
-                result = "보유 유지"
-            else:
-                order_desc = f"{action} {qty:,}주@{order_price_text(decision)}"
-                if matched:
-                    result = "; ".join(
-                        f"{action_ko(row_action(f))} {int(row_quantity(f)):,}주 체결@{money(f['executed_price'])}"
-                        for f in matched
-                    )
-                else:
-                    result = "미체결"
-            flow.append(
-                [
-                    turn["date"],
-                    short(turn["belief"].get("belief_summary"), 240),
-                    f"{order_desc}. {short(decision.get('reason'), 220)}",
-                    result,
-                ]
-            )
-        story.append(table([[para(c, styles["KSmall"]) for c in row] for row in flow], [22 * mm, 55 * mm, 62 * mm, 31 * mm]))
+    story.append(table([[para(c, styles["KSmall"]) for c in row] for row in pivot_rows], [21 * mm, 25 * mm, 34 * mm, 60 * mm, 30 * mm]))
 
-    story.append(PageBreak())
-    story.append(para("5. 대표 에이전트 최종 포트폴리오 및 해석", styles["KHeading1"]))
+    story.append(para("5. 대표/이상 에이전트 최종 포트폴리오 및 해석", styles["KHeading1"]))
     final_table = [["에이전트", "최종 보유", "현금", "평가 총자산", "평가 수익률", "요약 해석"]]
     for agent_id in representative_agents:
         state = final_states.get(agent_id, {})
@@ -632,7 +541,8 @@ def main() -> None:
             pos_text = f"{int(pos.get('quantity') or 0):,}주 / 평균 {money(pos.get('avg_cost'))}"
         rows = by_agent[agent_id]
         buys = sum(1 for r in rows if r["decision"]["action"] == "buy")
-        holds = sum(1 for r in rows if r["decision"]["action"] == "hold")
+        sells = sum(1 for r in rows if r["decision"]["action"] == "sell")
+        latest_view = rows[-1]["belief"].get("belief_summary") if rows else ""
         final_table.append(
             [
                 agent_id,
@@ -640,8 +550,7 @@ def main() -> None:
                 money(state.get("cash")),
                 money(state.get("total_value_marked_final")),
                 pct(state.get("return_rate_marked_final")),
-                f"{meta['date_count']}거래일 중 매수 판단 {buys}회, 보유 판단 {holds}회. "
-                f"{short(rows[-1]['belief'].get('belief_summary'), 130)}",
+                f"매수 {buys}회 / 매도 {sells}회. {short(latest_view, 140)}",
             ]
         )
     story.append(table([[para(c, styles["KSmall"]) for c in row] for row in final_table], [18 * mm, 32 * mm, 28 * mm, 30 * mm, 20 * mm, 42 * mm]))
