@@ -78,6 +78,17 @@ SIM_DDLS = [
     );
     """,
     """
+    CREATE TABLE IF NOT EXISTS agent_system_messages (
+        message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT NOT NULL,
+        turn INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        message_type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
+    """
     CREATE TABLE IF NOT EXISTS StockData (
         date TEXT NOT NULL,
         stock_id TEXT NOT NULL,

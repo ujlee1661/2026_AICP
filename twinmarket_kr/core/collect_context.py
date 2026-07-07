@@ -37,6 +37,7 @@ def collect_context(
     raw_history = memory_agent.get_recent_order_history(agent["agent_id"], last_n=5, current_date=date)
     order_history = _format_order_history(raw_history)
     action_reason = memory_agent.get_last_action_reason(agent["agent_id"])
+    system_message = memory_agent.get_recent_system_message(agent["agent_id"], current_turn=turn)
     news_depth = 1 if agent.get("news_depth") is None else int(agent["news_depth"])
     if news_start_date and news_start_time and news_end_time:
         news_context = news_agent.build_window_context(
@@ -95,6 +96,7 @@ def collect_context(
         "announced_price": announced_price,
         "previous_belief": previous_belief,
         "action_reason": action_reason,
+        "system_message": system_message,
         "portfolio_summary": portfolio_summary,
         "order_history": order_history,
         "news_context": news_context,

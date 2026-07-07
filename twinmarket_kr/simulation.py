@@ -33,8 +33,9 @@ def trading_dates_between(
     end_date: str | None = None,
     limit: int | None = None,
     daily_news_csv_path: Path | str = config.DAILY_NEWS_SELECTION_CSV,
+    sim_db_path: Path | str = config.SIM_DB,
 ) -> list[str]:
-    with connect(config.SIM_DB) as conn:
+    with connect(sim_db_path) as conn:
         rows = conn.execute(
             "SELECT date FROM StockData WHERE stock_id = ? ORDER BY date",
             (config.STOCK_CODE,),
@@ -50,8 +51,8 @@ def trading_dates_between(
     return dates[:limit] if limit else dates
 
 
-def _stock_trading_dates() -> list[str]:
-    with connect(config.SIM_DB) as conn:
+def _stock_trading_dates(sim_db_path: Path | str = config.SIM_DB) -> list[str]:
+    with connect(sim_db_path) as conn:
         rows = conn.execute(
             "SELECT date FROM StockData WHERE stock_id = ? ORDER BY date",
             (config.STOCK_CODE,),
@@ -59,8 +60,8 @@ def _stock_trading_dates() -> list[str]:
     return [str(row["date"]) for row in rows]
 
 
-def _previous_date_map() -> dict[str, str]:
-    dates = _stock_trading_dates()
+def _previous_date_map(sim_db_path: Path | str = config.SIM_DB) -> dict[str, str]:
+    dates = _stock_trading_dates(sim_db_path)
     return {day: dates[index - 1] for index, day in enumerate(dates) if index > 0}
 
 
@@ -88,6 +89,7 @@ async def run_simulation(
     processed_news_csv: Path | str | None = None,
     daily_news_csv: Path | str | None = None,
     fake_news_mode: str = "off",
+    sim_db: Path | str | None = None,
 ) -> None:
     if information_mode not in {"pre_close_cutoff", "same_day", "prior_close"}:
         raise ValueError("information_mode must be 'pre_close_cutoff', 'same_day', or 'prior_close'")
@@ -97,6 +99,7 @@ async def run_simulation(
         raise ValueError("fake_news_mode must be 'off' or 'on'")
     processed_news_path = Path(processed_news_csv) if processed_news_csv else config.PROCESSED_NEWS_CSV
     daily_news_path = Path(daily_news_csv) if daily_news_csv else config.DAILY_NEWS_SELECTION_CSV
+    sim_db_path = Path(sim_db) if sim_db else config.SIM_DB
     agents = load_agents_from_sys100(config.SYS_100_DB)
     if max_agents:
         all_agents = agents
@@ -108,7 +111,7 @@ async def run_simulation(
         else:
             agents = agents[:max_agents]
         agents = _ensure_depth2_agent(agents, all_agents)
-    previous_by_date = _previous_date_map()
+    previous_by_date = _previous_date_map(sim_db_path)
     uses_previous_market = information_mode in {"pre_close_cutoff", "prior_close"}
     date_limit = None if max_days is None else max_days + (1 if uses_previous_market else 0)
     dates = trading_dates_between(
@@ -116,6 +119,7 @@ async def run_simulation(
         end_date=end_date,
         limit=date_limit,
         daily_news_csv_path=daily_news_path,
+        sim_db_path=sim_db_path,
     )
     if uses_previous_market:
         dates = [day for day in dates if day in previous_by_date]
@@ -124,17 +128,17 @@ async def run_simulation(
     if not dates:
         raise RuntimeError("No StockData rows found. Run scripts/03_load_stock_data.py first.")
 
-    _reset_runtime_tables(config.SIM_DB)
-    memory = MemoryAgent(config.SIM_DB)
-    fundamental = FundamentalAgent(config.SIM_DB)
+    _reset_runtime_tables(sim_db_path)
+    memory = MemoryAgent(sim_db_path)
+    fundamental = FundamentalAgent(sim_db_path)
     news = NewsAgent(
         processed_csv_path=processed_news_path,
         daily_csv_path=daily_news_path,
         include_fake_news=fake_news_mode == "on",
     )
-    exchange = ExchangeAgent(config.SIM_DB)
+    exchange = ExchangeAgent(sim_db_path)
     execution_prices = _load_execution_prices(fundamental, dates)
-    community = CommunityAgent(config.SIM_DB) if config.ENABLE_COMMUNITY else None
+    community = CommunityAgent(sim_db_path) if config.ENABLE_COMMUNITY else None
     client = OpenRouterClient()
     semaphore = asyncio.Semaphore(concurrency)
     db_write_lock = asyncio.Lock()
@@ -147,7 +151,7 @@ async def run_simulation(
                 "agent_count": len(agents),
                 "date_count": len(dates),
                 "turn_count": len(dates) * 2,
-                "sim_db": str(config.SIM_DB),
+                "sim_db": str(sim_db_path),
                 "random_agents": random_agents,
                 "random_seed": random_seed,
                 "start_date": start_date,
@@ -212,7 +216,14 @@ async def run_simulation(
             except Exception as exc:
                 if logger is not None:
                     logger.log_agent_error(agent=agent, turn=turn, date=day, error=exc)
-                raise
+                memory.save_system_message(
+                    str(agent["agent_id"]),
+                    turn,
+                    day,
+                    message_type="system_error",
+                    message="이번 턴은 시스템 오류로 실패 처리되었습니다. 다음 턴에서는 이 실패를 고려해 다시 판단하세요.",
+                )
+                return None
 
     for day_index, day in enumerate(dates, start=1):
         previous_execution_date = previous_by_date.get(day)

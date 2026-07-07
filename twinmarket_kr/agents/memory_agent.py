@@ -233,6 +233,26 @@ class MemoryAgent:
             )
             conn.commit()
 
+    def save_system_message(
+        self,
+        agent_id: str,
+        turn: int,
+        date: str,
+        *,
+        message_type: str,
+        message: str,
+    ) -> None:
+        with connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO agent_system_messages (
+                    agent_id, turn, date, message_type, message
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (agent_id, int(turn), date, message_type, message),
+            )
+            conn.commit()
+
     def update_trade_execution(
         self,
         agent_id: str,
@@ -337,6 +357,23 @@ class MemoryAgent:
             f"이전 주문: {row['action']} {int(row['quantity']):,}주. "
             f"체결 결과: {result}. 사유: {row['action_reason']}"
         )
+
+    def get_recent_system_message(self, agent_id: str, *, current_turn: int | None = None) -> str | None:
+        query = """
+            SELECT turn, date, message_type, message
+            FROM agent_system_messages
+            WHERE agent_id = ?
+        """
+        params: list[Any] = [agent_id]
+        if current_turn is not None:
+            query += " AND turn < ?"
+            params.append(int(current_turn))
+        query += " ORDER BY turn DESC, message_id DESC LIMIT 1"
+        with connect(self.db_path) as conn:
+            row = conn.execute(query, params).fetchone()
+        if row is None:
+            return None
+        return f"시스템 알림: {row['date']} turn {row['turn']} {row['message_type']}. {row['message']}"
 
     def get_portfolio_summary(self, agent_id: str, turn: int) -> str:
         row = self._latest_portfolio(agent_id, before_or_at_turn=turn)

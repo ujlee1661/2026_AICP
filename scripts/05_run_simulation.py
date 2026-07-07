@@ -99,6 +99,7 @@ def main() -> None:
     )
     parser.add_argument("--processed-news-csv", default=None)
     parser.add_argument("--daily-news-csv", default=None)
+    parser.add_argument("--sim-db", default=None, help="Simulation SQLite database path.")
     parser.add_argument("--no-logs", action="store_true", help="Disable detailed output logs.")
     args = parser.parse_args()
     processed_news_csv = args.processed_news_csv
@@ -125,6 +126,7 @@ def main() -> None:
             processed_news_csv=processed_news_csv,
             daily_news_csv=daily_news_csv,
             fake_news_mode=fake_news_mode,
+            sim_db=args.sim_db,
         )
     )
 
