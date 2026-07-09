@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import shutil
 import threading
 from datetime import datetime
@@ -20,8 +21,8 @@ class SimulationLogger:
         metadata: dict[str, Any] | None = None,
         overwrite_root: bool = False,
     ) -> None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.run_id = run_id or f"simulation_{timestamp}"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        self.run_id = run_id or f"simulation_{timestamp}_{os.getpid()}"
         root = Path(root_dir)
         if overwrite_root and root.exists():
             shutil.rmtree(root)
@@ -580,15 +581,27 @@ class SimulationLogger:
 
     def _update_current_pointer(self, root: Path) -> None:
         current = root / "current"
-        if current.exists() or current.is_symlink():
-            if current.is_dir() and not current.is_symlink():
-                shutil.rmtree(current)
+        tmp_current = root / f".current.{self.run_id}.tmp"
+        if tmp_current.exists() or tmp_current.is_symlink():
+            if tmp_current.is_dir() and not tmp_current.is_symlink():
+                shutil.rmtree(tmp_current)
             else:
-                current.unlink()
+                tmp_current.unlink()
         try:
-            current.symlink_to(self.run_dir.name, target_is_directory=True)
+            tmp_current.symlink_to(self.run_dir.name, target_is_directory=True)
+            tmp_current.replace(current)
         except OSError:
-            shutil.copytree(self.run_dir, current)
+            if tmp_current.exists() or tmp_current.is_symlink():
+                tmp_current.unlink()
+            if current.exists() or current.is_symlink():
+                if current.is_dir() and not current.is_symlink():
+                    shutil.rmtree(current)
+                else:
+                    current.unlink()
+            try:
+                shutil.copytree(self.run_dir, current)
+            except FileExistsError:
+                pass
 
     @staticmethod
     def _compact_agent(agent: dict[str, Any]) -> dict[str, Any]:

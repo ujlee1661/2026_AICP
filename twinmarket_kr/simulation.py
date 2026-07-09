@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import fcntl
 import json
+import os
 import random
+import sqlite3
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +77,41 @@ def _daily_news_dates(daily_news_csv_path: Path | str = config.DAILY_NEWS_SELECT
         return {row["date"] for row in csv.DictReader(f) if row.get("date")}
 
 
+def _isolated_sim_db_path() -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    return config.OUTPUT_DIR / "runtime_dbs" / f"sim_{timestamp}_{os.getpid()}.db"
+
+
+def _prepare_sim_db(sim_db: Path | str | None) -> Path:
+    if sim_db:
+        return Path(sim_db)
+    source = config.SIM_DB
+    if not source.exists():
+        raise RuntimeError("outputs/sim.db not found. Run scripts/03_load_stock_data.py first.")
+    target = _isolated_sim_db_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(source) as src, sqlite3.connect(target) as dst:
+        src.backup(dst)
+    return target
+
+
+def _acquire_sim_db_lock(sim_db_path: Path) -> Any:
+    lock_path = sim_db_path.with_suffix(sim_db_path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = lock_path.open("w", encoding="utf-8")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        lock_file.close()
+        raise RuntimeError(
+            f"Simulation DB is already in use: {sim_db_path}. "
+            "Use a separate --sim-db path for each concurrent run."
+        ) from exc
+    lock_file.write(f"pid={os.getpid()}\n")
+    lock_file.flush()
+    return lock_file
+
+
 async def run_simulation(
     *,
     max_agents: int | None = None,
@@ -89,6 +128,7 @@ async def run_simulation(
     processed_news_csv: Path | str | None = None,
     daily_news_csv: Path | str | None = None,
     fake_news_mode: str = "off",
+    community_mode: str | None = None,
     sim_db: Path | str | None = None,
 ) -> None:
     if information_mode not in {"pre_close_cutoff", "same_day", "prior_close"}:
@@ -97,9 +137,14 @@ async def run_simulation(
         raise ValueError("decision_space must be 'buy_sell_only'")
     if fake_news_mode not in {"off", "on"}:
         raise ValueError("fake_news_mode must be 'off' or 'on'")
+    if community_mode is None:
+        community_mode = "on" if config.ENABLE_COMMUNITY else "off"
+    if community_mode not in {"off", "on"}:
+        raise ValueError("community_mode must be 'off' or 'on'")
     processed_news_path = Path(processed_news_csv) if processed_news_csv else config.PROCESSED_NEWS_CSV
     daily_news_path = Path(daily_news_csv) if daily_news_csv else config.DAILY_NEWS_SELECTION_CSV
-    sim_db_path = Path(sim_db) if sim_db else config.SIM_DB
+    sim_db_path = _prepare_sim_db(sim_db)
+    _sim_db_lock = _acquire_sim_db_lock(sim_db_path)
     agents = load_agents_from_sys100(config.SYS_100_DB)
     if max_agents:
         all_agents = agents
@@ -138,7 +183,8 @@ async def run_simulation(
     )
     exchange = ExchangeAgent(sim_db_path)
     execution_prices = _load_execution_prices(fundamental, dates)
-    community = CommunityAgent(sim_db_path) if config.ENABLE_COMMUNITY else None
+    community_enabled = community_mode == "on"
+    community = CommunityAgent(sim_db_path) if community_enabled else None
     client = OpenRouterClient()
     semaphore = asyncio.Semaphore(concurrency)
     db_write_lock = asyncio.Lock()
@@ -164,6 +210,9 @@ async def run_simulation(
                 "processed_news_csv": str(processed_news_path),
                 "daily_news_csv": str(daily_news_path),
                 "fake_news_mode": fake_news_mode,
+                "community_mode": community_mode,
+                "community_posting": bool(community_enabled and config.ENABLE_COMMUNITY_POSTING),
+                "community_reading": bool(community_enabled and config.ENABLE_COMMUNITY_READING),
                 "agent_ids": [agent["agent_id"] for agent in agents],
                 "agent_depths": {agent["agent_id"]: int(agent.get("news_depth") or 0) for agent in agents},
                 "subturns": ["am", "pm"],
@@ -290,7 +339,7 @@ async def run_simulation(
             execution_reference="close price",
         )
 
-        if config.ENABLE_COMMUNITY and config.ENABLE_COMMUNITY_POSTING and community is not None:
+        if community_enabled and config.ENABLE_COMMUNITY_POSTING and community is not None:
             await post_trade_posting_phase(
                 turn_results=pm_results["turn_results"],
                 community_agent=community,
@@ -301,11 +350,12 @@ async def run_simulation(
                 concurrency=concurrency,
                 event_logger=logger,
             )
-        if config.ENABLE_COMMUNITY and community is not None:
+        if community_enabled and community is not None:
             await community_phase(
                 agents=agents,
                 community_agent=community,
                 memory_agent=memory,
+                sim_db_path=sim_db_path,
                 turn=pm_turn,
                 date=day,
                 client=client,
@@ -630,6 +680,7 @@ async def community_phase(
     agents: list[dict[str, Any]],
     community_agent: CommunityAgent,
     memory_agent: MemoryAgent,
+    sim_db_path: Path | str,
     turn: int,
     date: str,
     client: OpenRouterClient,
@@ -660,7 +711,7 @@ async def community_phase(
                     )
         return
 
-    badges = calculate_badges(agents, memory_agent, turn, str(config.SIM_DB))
+    badges = calculate_badges(agents, memory_agent, turn, str(sim_db_path))
     active_agents = [agent for agent in agents if int(agent.get("news_depth") or 0) >= 1]
     if not active_agents:
         community_agent.mark_best_posts(date, config.COMMUNITY_BEST_POST_COUNT)

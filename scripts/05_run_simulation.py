@@ -68,7 +68,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-agents", type=int, default=None)
     parser.add_argument("--max-days", type=int, default=None)
-    parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--random-agents", action="store_true")
     parser.add_argument("--seed", type=int, default=2)
     parser.add_argument("--start-date", default=None)
@@ -96,6 +96,12 @@ def main() -> None:
         choices=("off", "on"),
         default=None,
         help="Control whether rows marked is_fake=true are visible to agents.",
+    )
+    parser.add_argument(
+        "--community-mode",
+        choices=("off", "on"),
+        default="on" if config.ENABLE_COMMUNITY else "off",
+        help="Control whether community posting/reading is enabled for this run.",
     )
     parser.add_argument("--processed-news-csv", default=None)
     parser.add_argument("--daily-news-csv", default=None)
@@ -126,6 +132,7 @@ def main() -> None:
             processed_news_csv=processed_news_csv,
             daily_news_csv=daily_news_csv,
             fake_news_mode=fake_news_mode,
+            community_mode=args.community_mode,
             sim_db=args.sim_db,
         )
     )
