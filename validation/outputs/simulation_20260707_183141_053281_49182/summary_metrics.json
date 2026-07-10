@@ -1,9 +1,9 @@
 {
-  "run_id": "simulation_20260707_001750",
-  "run_dir": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/outputs/logs/simulation_20260707_001750",
+  "run_id": "simulation_20260707_183141_053281_49182",
+  "run_dir": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/outputs/logs/simulation_20260707_183141_053281_49182",
   "actual_value": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/validation/data_trading_value.csv",
   "actual_volume": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/validation/data_trading_volume.csv",
-  "generated_at": "2026-07-10T18:18:18",
+  "generated_at": "2026-07-10T18:18:20",
   "information_mode": "pre_close_cutoff",
   "limit_only_orders": false,
   "skip_initial_days": 3,
@@ -21,33 +21,33 @@
     "metric": "value",
     "overlap_days": 17,
     "primary_metrics": {
-      "direction_match_rate": 0.7059,
-      "buy_recall": 0.6923,
-      "sell_recall": 0.75,
-      "balanced_accuracy": 0.7212
+      "direction_match_rate": 0.4118,
+      "buy_recall": 0.3846,
+      "sell_recall": 0.5,
+      "balanced_accuracy": 0.4423
     },
     "reference_metrics": {
-      "pearson_daily": 0.05349550285757603,
-      "pearson_cumulative": -0.4876908286314209,
+      "pearson_daily": 0.02029873363394024,
+      "pearson_cumulative": -0.013637622928980598,
       "note": "누적 Pearson은 상승장 + 단일가 체결 구조상 구조적 역전이 발생할 수 있음"
     },
     "llm_vs_individuals": {
       "days": 17,
-      "direction_match_rate": 0.7058823529411765,
-      "nonzero_direction_match_rate": 0.7058823529411765,
-      "buy_recall": 0.6923076923076923,
-      "sell_recall": 0.75,
-      "sell_day_recall": 0.75,
-      "balanced_accuracy": 0.7211538461538461,
+      "direction_match_rate": 0.4117647058823529,
+      "nonzero_direction_match_rate": 0.4117647058823529,
+      "buy_recall": 0.38461538461538464,
+      "sell_recall": 0.5,
+      "sell_day_recall": 0.5,
+      "balanced_accuracy": 0.4423076923076923,
       "confusion_matrix": {
         "actual_buy": {
-          "pred_buy": 9,
-          "pred_sell": 4,
+          "pred_buy": 5,
+          "pred_sell": 8,
           "pred_flat": 0
         },
         "actual_sell": {
-          "pred_buy": 1,
-          "pred_sell": 3,
+          "pred_buy": 2,
+          "pred_sell": 2,
           "pred_flat": 0
         },
         "actual_flat": {
@@ -62,23 +62,23 @@
         "flat": 0
       },
       "predicted_direction_counts": {
-        "buy": 10,
-        "sell": 7,
+        "buy": 7,
+        "sell": 10,
         "flat": 0
       },
-      "pearson_correlation": 0.05349550285757603,
-      "cosine_similarity": 0.08991816411262997,
+      "pearson_correlation": 0.02029873363394024,
+      "cosine_similarity": 0.06232083094953047,
       "max_abs_normalized": {
-        "pearson_correlation": 0.05349550285757605,
-        "cosine_similarity": 0.08991816411262998
+        "pearson_correlation": 0.020298733633940243,
+        "cosine_similarity": 0.062320830949530455
       },
       "z_score_normalized": {
-        "pearson_correlation": 0.05349550285757605,
-        "cosine_similarity": 0.05349550285757605
+        "pearson_correlation": 0.02029873363394025,
+        "cosine_similarity": 0.02029873363394025
       },
       "cumulative_max_abs_normalized": {
-        "pearson_correlation": -0.4876908286314209,
-        "cosine_similarity": 0.6937411698685552
+        "pearson_correlation": -0.013637622928980598,
+        "cosine_similarity": 0.7610145057907045
       }
     },
     "baselines_vs_individuals": {
@@ -298,33 +298,33 @@
     "metric": "volume",
     "overlap_days": 17,
     "primary_metrics": {
-      "direction_match_rate": 0.7059,
-      "buy_recall": 0.6923,
-      "sell_recall": 0.75,
-      "balanced_accuracy": 0.7212
+      "direction_match_rate": 0.4118,
+      "buy_recall": 0.3846,
+      "sell_recall": 0.5,
+      "balanced_accuracy": 0.4423
     },
     "reference_metrics": {
-      "pearson_daily": 0.01289641579302624,
-      "pearson_cumulative": -0.5051334285298407,
+      "pearson_daily": -0.015174794105987453,
+      "pearson_cumulative": -0.03194395191511479,
       "note": "누적 Pearson은 상승장 + 단일가 체결 구조상 구조적 역전이 발생할 수 있음"
     },
     "llm_vs_individuals": {
       "days": 17,
-      "direction_match_rate": 0.7058823529411765,
-      "nonzero_direction_match_rate": 0.7058823529411765,
-      "buy_recall": 0.6923076923076923,
-      "sell_recall": 0.75,
-      "sell_day_recall": 0.75,
-      "balanced_accuracy": 0.7211538461538461,
+      "direction_match_rate": 0.4117647058823529,
+      "nonzero_direction_match_rate": 0.4117647058823529,
+      "buy_recall": 0.38461538461538464,
+      "sell_recall": 0.5,
+      "sell_day_recall": 0.5,
+      "balanced_accuracy": 0.4423076923076923,
       "confusion_matrix": {
         "actual_buy": {
-          "pred_buy": 9,
-          "pred_sell": 4,
+          "pred_buy": 5,
+          "pred_sell": 8,
           "pred_flat": 0
         },
         "actual_sell": {
-          "pred_buy": 1,
-          "pred_sell": 3,
+          "pred_buy": 2,
+          "pred_sell": 2,
           "pred_flat": 0
         },
         "actual_flat": {
@@ -339,23 +339,23 @@
         "flat": 0
       },
       "predicted_direction_counts": {
-        "buy": 10,
-        "sell": 7,
+        "buy": 7,
+        "sell": 10,
         "flat": 0
       },
-      "pearson_correlation": 0.01289641579302624,
-      "cosine_similarity": 0.05111045821888062,
+      "pearson_correlation": -0.015174794105987453,
+      "cosine_similarity": 0.02937955764613687,
       "max_abs_normalized": {
-        "pearson_correlation": 0.012896415793026278,
-        "cosine_similarity": 0.05111045821888062
+        "pearson_correlation": -0.015174794105987453,
+        "cosine_similarity": 0.02937955764613688
       },
       "z_score_normalized": {
-        "pearson_correlation": 0.012896415793026202,
-        "cosine_similarity": 0.012896415793026203
+        "pearson_correlation": -0.01517479410598741,
+        "cosine_similarity": -0.015174794105987433
       },
       "cumulative_max_abs_normalized": {
-        "pearson_correlation": -0.5051334285298407,
-        "cosine_similarity": 0.6683161701226132
+        "pearson_correlation": -0.03194395191511479,
+        "cosine_similarity": 0.7454685276780036
       }
     },
     "baselines_vs_individuals": {
@@ -573,27 +573,27 @@
   },
   "primary_metrics": {
     "value": {
-      "direction_match_rate": 0.7059,
-      "buy_recall": 0.6923,
-      "sell_recall": 0.75,
-      "balanced_accuracy": 0.7212
+      "direction_match_rate": 0.4118,
+      "buy_recall": 0.3846,
+      "sell_recall": 0.5,
+      "balanced_accuracy": 0.4423
     },
     "volume": {
-      "direction_match_rate": 0.7059,
-      "buy_recall": 0.6923,
-      "sell_recall": 0.75,
-      "balanced_accuracy": 0.7212
+      "direction_match_rate": 0.4118,
+      "buy_recall": 0.3846,
+      "sell_recall": 0.5,
+      "balanced_accuracy": 0.4423
     }
   },
   "reference_metrics": {
     "value": {
-      "pearson_daily": 0.05349550285757603,
-      "pearson_cumulative": -0.4876908286314209,
+      "pearson_daily": 0.02029873363394024,
+      "pearson_cumulative": -0.013637622928980598,
       "note": "누적 Pearson은 상승장 + 단일가 체결 구조상 구조적 역전이 발생할 수 있음"
     },
     "volume": {
-      "pearson_daily": 0.01289641579302624,
-      "pearson_cumulative": -0.5051334285298407,
+      "pearson_daily": -0.015174794105987453,
+      "pearson_cumulative": -0.03194395191511479,
       "note": "누적 Pearson은 상승장 + 단일가 체결 구조상 구조적 역전이 발생할 수 있음"
     },
     "note": "누적 Pearson은 상승장 + 단일가 체결 구조상 구조적 역전이 발생할 수 있음"

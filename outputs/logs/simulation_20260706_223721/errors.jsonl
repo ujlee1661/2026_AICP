@@ -1,1 +1,0 @@
-{"run_id": "simulation_20260706_223721", "event": "agent_error", "date": "2026-03-04", "turn": 6, "agent_id": "A007", "error_type": "ValueError", "error": "invalid decision after retry: ['action_not_allowed:', 'invalid_action:', 'quantity_below_min']"}

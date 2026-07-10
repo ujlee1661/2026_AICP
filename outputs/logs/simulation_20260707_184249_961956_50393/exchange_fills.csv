@@ -1,3 +1,0 @@
-﻿run_id,date,turn,subturn,stock_code,agent_id,action,quantity,executed_price,status
-simulation_20260707_184249_961956_50393,2026-02-27,1,am,005930,A007,buy,230,210000.0,filled
-simulation_20260707_184249_961956_50393,2026-02-27,2,pm,005930,A007,buy,100,216500.0,filled

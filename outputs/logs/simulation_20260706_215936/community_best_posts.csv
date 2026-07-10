@@ -1,6 +1,0 @@
-﻿run_id,date,turn,rank,post_id,title,post_type,score
-simulation_20260706_215936,2026-02-27,2,1,1959,오늘 삼성전자 일부 매도했습니다.,trade_share,4
-simulation_20260706_215936,2026-02-27,2,2,1957,오늘 삼성전자 추가 매수했습니다!,trade_share,-1
-simulation_20260706_215936,2026-02-27,2,3,1958,오늘 삼성전자 추가 매수했습니다!,trade_share,-1
-simulation_20260706_215936,2026-02-27,2,4,1961,오늘 삼성전자 추가 매수했습니다!,trade_share,-1
-simulation_20260706_215936,2026-02-27,2,5,1960,오늘 삼성전자 매수했습니다!,trade_share,-2
