@@ -183,6 +183,35 @@ python scripts/05_run_simulation.py --use-fake-news-injection --fake-news-mode o
 
 `--use-fake-news-injection`만 지정하면 기존 동작과 같게 `--fake-news-mode on`으로 처리됩니다.
 
+## 현재 주요 실행 현황
+
+아래 실행들은 `outputs/logs/<run_id>/run_metadata.json`과 `run_complete.json` 기준으로 완료가 확인된 run입니다.
+여기서 "30일" 실험은 달력상 `2026-02-27`부터 `2026-03-27`까지 약 한 달 구간이며, 실제 실행 대상은 주식 거래일 기준 20일(`date_count=20`, `turn_count=40`)입니다.
+
+| Run ID | 조건 요약 | 기간 | 거래일/턴 | 완료 상태 | 산출물 |
+| --- | --- | --- | ---: | --- | --- |
+| `simulation_20260707_001750` | 30명, community ON, fake news OFF | `2026-02-27` ~ `2026-03-27` | 20거래일 / 40턴 | 완료 | 실행/커뮤니티/가짜뉴스/검증 보고서 생성됨 |
+| `simulation_20260707_183141_053281_49182` | 30명, community ON, fake news ON | `2026-02-27` ~ `2026-03-27` | 20거래일 / 40턴 | 완료 | 실행/커뮤니티/가짜뉴스/검증 보고서 생성됨 |
+| `simulation_20260707_184205_084828_50261` | 30명, community OFF, fake news ON | `2026-02-27` ~ `2026-03-27` | 20거래일 / 40턴 | 완료 | 실행/가짜뉴스/검증 보고서 생성됨 |
+| `simulation_20260707_185124_737097_51259` | 30명, community OFF, fake news OFF smoke test | `2026-02-27` ~ `2026-03-03` | 2거래일 / 4턴 | 완료 | 실행/검증 보고서 생성됨 |
+| `simulation_20260710_185009_391863_19763` | 30명, community OFF, fake news OFF | `2026-02-27` ~ `2026-03-27` | 20거래일 / 40턴 | 완료 | 실행/심층분석/검증 보고서 생성됨 |
+
+주의사항:
+
+- `simulation_20260707_001750`은 구버전 메타데이터에 `community_mode` 필드가 없지만, `community_posts.csv`, `community_interactions.csv`, `community_logs.csv` 등 커뮤니티 산출물이 존재하므로 community ON 실행으로 분류한다.
+- `simulation_20260707_185124_737097_51259`는 "4일" 실행이 아니라 로그 기준 `date_count=2`, `turn_count=4`인 2거래일 smoke test다.
+- 최신 baseline인 `simulation_20260710_185009_391863_19763`은 `community_mode=off`, `community_posting=False`, `community_reading=False`, `fake_news_mode=off`로 확인됐고, `agent_turns.csv`의 fake 노출/검색/선택 카운트 합계도 0이다.
+- `simulation_20260710_185009_391863_19763`은 `--balanced-depths --seed 2`로 실행되어 항상 같은 30명을 고정 선택하는 조건을 따른다.
+
+현재 기준 비교 축은 다음과 같다.
+
+| 비교 목적 | Baseline | 비교 대상 |
+| --- | --- | --- |
+| 커뮤니티 효과 | `simulation_20260710_185009_391863_19763` | `simulation_20260707_001750` |
+| 가짜뉴스 효과, community ON 조건 | `simulation_20260707_001750` | `simulation_20260707_183141_053281_49182` |
+| 가짜뉴스 효과, community OFF 조건 | `simulation_20260710_185009_391863_19763` | `simulation_20260707_184205_084828_50261` |
+| smoke sanity check | `simulation_20260710_185009_391863_19763` | `simulation_20260707_185124_737097_51259` |
+
 ## 뉴스 Depth
 
 | Depth | 동작 |
