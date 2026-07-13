@@ -5,7 +5,6 @@ import csv
 import fcntl
 import json
 import os
-import random
 import sqlite3
 from collections import defaultdict
 from datetime import datetime
@@ -116,15 +115,12 @@ async def run_simulation(
     *,
     max_agents: int | None = None,
     max_days: int | None = None,
-    concurrency: int = 8,
     enable_logs: bool = True,
-    random_agents: bool = False,
     random_seed: int = config.RANDOM_SEED,
     start_date: str | None = None,
     end_date: str | None = None,
     information_mode: str = "pre_close_cutoff",
     decision_space: str = "buy_sell_only",
-    balanced_depths: bool = False,
     processed_news_csv: Path | str | None = None,
     daily_news_csv: Path | str | None = None,
     fake_news_mode: str = "off",
@@ -143,18 +139,13 @@ async def run_simulation(
         raise ValueError("community_mode must be 'off' or 'on'")
     processed_news_path = Path(processed_news_csv) if processed_news_csv else config.PROCESSED_NEWS_CSV
     daily_news_path = Path(daily_news_csv) if daily_news_csv else config.DAILY_NEWS_SELECTION_CSV
+    concurrency = config.SIMULATION_CONCURRENCY
     sim_db_path = _prepare_sim_db(sim_db)
     _sim_db_lock = _acquire_sim_db_lock(sim_db_path)
     agents = load_agents_from_sys100(config.SYS_100_DB)
     if max_agents:
         all_agents = agents
-        if balanced_depths:
-            agents = _sample_balanced_depths(agents, max_agents, random_seed)
-        elif random_agents:
-            agents = random.Random(random_seed).sample(agents, min(max_agents, len(agents)))
-            agents.sort(key=lambda agent: agent["agent_id"])
-        else:
-            agents = agents[:max_agents]
+        agents = agents[:max_agents]
         agents = _ensure_depth2_agent(agents, all_agents)
     previous_by_date = _previous_date_map(sim_db_path)
     uses_previous_market = information_mode in {"pre_close_cutoff", "prior_close"}
@@ -198,7 +189,7 @@ async def run_simulation(
                 "date_count": len(dates),
                 "turn_count": len(dates) * 2,
                 "sim_db": str(sim_db_path),
-                "random_agents": random_agents,
+                "random_agents": False,
                 "random_seed": random_seed,
                 "start_date": start_date,
                 "end_date": end_date,
@@ -206,7 +197,7 @@ async def run_simulation(
                 "decision_space": decision_space,
                 "limit_only_orders": False,
                 "exchange_mode": "announced_price_binary",
-                "balanced_depths": balanced_depths,
+                "agent_selection": "first_n",
                 "processed_news_csv": str(processed_news_path),
                 "daily_news_csv": str(daily_news_path),
                 "fake_news_mode": fake_news_mode,
@@ -503,45 +494,6 @@ def _ensure_depth2_agent(agents: list[dict[str, Any]], all_agents: list[dict[str
     return sorted({agent["agent_id"]: agent for agent in replaced}.values(), key=lambda agent: agent["agent_id"])
 
 
-def _sample_balanced_depths(
-    agents: list[dict[str, Any]],
-    max_agents: int,
-    random_seed: int,
-) -> list[dict[str, Any]]:
-    if max_agents <= 0:
-        return []
-    by_depth: dict[int, list[dict[str, Any]]] = defaultdict(list)
-    for agent in agents:
-        by_depth[int(agent.get("news_depth") or 0)].append(agent)
-    for candidates in by_depth.values():
-        candidates.sort(key=lambda agent: agent["agent_id"])
-
-    depths = [0, 1, 2]
-    missing = [depth for depth in depths if not by_depth.get(depth)]
-    if missing:
-        raise RuntimeError(f"Depth 후보가 없습니다: {missing}")
-
-    base = max_agents // len(depths)
-    remainder = max_agents % len(depths)
-    quotas = {depth: base for depth in depths}
-    for depth in depths[:remainder]:
-        quotas[depth] += 1
-
-    selected: list[dict[str, Any]] = []
-    for depth in depths:
-        candidates = by_depth[depth]
-        take = min(quotas[depth], len(candidates))
-        selected.extend(candidates[:take])
-
-    if len(selected) < max_agents:
-        selected_ids = {agent["agent_id"] for agent in selected}
-        remaining = [agent for agent in agents if agent["agent_id"] not in selected_ids]
-        remaining.sort(key=lambda agent: agent["agent_id"])
-        selected.extend(remaining[: max_agents - len(selected)])
-
-    return sorted(selected, key=lambda agent: agent["agent_id"])
-
-
 def _update_portfolios_from_results(
     *,
     memory: MemoryAgent,
@@ -629,7 +581,7 @@ async def post_trade_posting_phase(
     turn: int,
     date: str,
     client: OpenRouterClient,
-    concurrency: int = 8,
+    concurrency: int = config.SIMULATION_CONCURRENCY,
     event_logger: SimulationLogger | None = None,
 ) -> None:
     active_results = [
@@ -684,7 +636,7 @@ async def community_phase(
     turn: int,
     date: str,
     client: OpenRouterClient,
-    concurrency: int = 8,
+    concurrency: int = config.SIMULATION_CONCURRENCY,
     event_logger: SimulationLogger | None = None,
 ) -> None:
     if not config.ENABLE_COMMUNITY_READING:

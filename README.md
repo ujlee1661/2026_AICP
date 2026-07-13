@@ -138,11 +138,9 @@ python scripts/04_generate_initial_beliefs.py
 ```bash
 python scripts/05_run_simulation.py \
   --max-agents 50 \
-  --balanced-depths \
   --seed 2 \
   --start-date 2026-02-27 \
   --end-date 2026-05-12 \
-  --concurrency 8
 ```
 
 주요 옵션:
@@ -152,9 +150,6 @@ python scripts/05_run_simulation.py \
 | `--max-agents` | 실행할 에이전트 수 |
 | `--max-days` | 실행할 거래일 수 |
 | `--start-date`, `--end-date` | 실행 기간 |
-| `--concurrency` | LLM 호출 동시성 |
-| `--random-agents` | 무작위 에이전트 샘플 |
-| `--balanced-depths` | Depth 0/1/2 균형 샘플 |
 | `--seed` | 샘플 재현용 seed |
 | `--information-mode` | 정보 컷오프 방식 |
 | `--use-fake-news-injection` | injection 뉴스 CSV를 사용 |
@@ -201,7 +196,7 @@ python scripts/05_run_simulation.py --use-fake-news-injection --fake-news-mode o
 - `simulation_20260707_001750`은 구버전 메타데이터에 `community_mode` 필드가 없지만, `community_posts.csv`, `community_interactions.csv`, `community_logs.csv` 등 커뮤니티 산출물이 존재하므로 community ON 실행으로 분류한다.
 - `simulation_20260707_185124_737097_51259`는 "4일" 실행이 아니라 로그 기준 `date_count=2`, `turn_count=4`인 2거래일 smoke test다.
 - 최신 baseline인 `simulation_20260710_185009_391863_19763`은 `community_mode=off`, `community_posting=False`, `community_reading=False`, `fake_news_mode=off`로 확인됐고, `agent_turns.csv`의 fake 노출/검색/선택 카운트 합계도 0이다.
-- `simulation_20260710_185009_391863_19763`은 `--balanced-depths --seed 2`로 실행되어 항상 같은 30명을 고정 선택하는 조건을 따른다.
+- 현재 코드는 `sys_100.db`의 앞에서부터 `--max-agents`명을 선택한다.
 
 현재 기준 비교 축은 다음과 같다.
 
@@ -312,8 +307,7 @@ python scripts/99_validate.py
 ```bash
 python scripts/06_run_community_smoke_test.py \
   --max-agents 3 \
-  --max-days 2 \
-  --concurrency 1
+  --max-days 2
 ```
 
 ## 주의 사항

@@ -969,7 +969,7 @@ def main():
                     "Depth 2: Depth 1 + 최근 7일 키워드 검색. 커뮤니티 최대 10개 열람.",
                     f"이번 실험: Depth 0 약 {sum(1 for d in data['agent_depths'].values() if d==0)}명, "
                     f"Depth 1 약 {sum(1 for d in data['agent_depths'].values() if d==1)}명, "
-                    f"Depth 2 약 {sum(1 for d in data['agent_depths'].values() if d==2)}명 (balanced_depths=True로 균등 배분).",
+                    f"Depth 2 약 {sum(1 for d in data['agent_depths'].values() if d==2)}명.",
                 ]),
                 ("Turnover Ratio 계산 방식", [
                     "Turnover Ratio = 총 체결 거래금액 / 초기 포트폴리오 가치.",

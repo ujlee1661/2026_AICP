@@ -68,8 +68,6 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-agents", type=int, default=None)
     parser.add_argument("--max-days", type=int, default=None)
-    parser.add_argument("--concurrency", type=int, default=4)
-    parser.add_argument("--random-agents", action="store_true")
     parser.add_argument("--seed", type=int, default=2)
     parser.add_argument("--start-date", default=None)
     parser.add_argument("--end-date", default=None)
@@ -85,7 +83,6 @@ def main() -> None:
         default="buy_sell_only",
         help="Allowed trading actions for the decision parser.",
     )
-    parser.add_argument("--balanced-depths", action="store_true")
     parser.add_argument(
         "--use-fake-news-injection",
         action="store_true",
@@ -120,15 +117,12 @@ def main() -> None:
         run_simulation(
             max_agents=args.max_agents,
             max_days=args.max_days,
-            concurrency=args.concurrency,
             enable_logs=not args.no_logs,
-            random_agents=args.random_agents,
             random_seed=args.seed,
             start_date=args.start_date,
             end_date=args.end_date,
             information_mode=args.information_mode,
             decision_space=args.decision_space,
-            balanced_depths=args.balanced_depths,
             processed_news_csv=processed_news_csv,
             daily_news_csv=daily_news_csv,
             fake_news_mode=fake_news_mode,

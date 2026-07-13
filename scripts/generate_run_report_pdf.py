@@ -347,7 +347,7 @@ def main() -> None:
             "실행 조건",
             f"에이전트 {meta['agent_count']}명, {meta['date_count']}거래일, "
             f"기간={meta.get('start_date') or daily_rows[0]['date']}~{meta.get('end_date') or daily_rows[-1]['date']}, "
-            f"seed={meta['random_seed']}, concurrency={meta['concurrency']}, balanced_depths={meta.get('balanced_depths', False)}, "
+            f"seed={meta['random_seed']}, concurrency={meta['concurrency']}, agent_selection={meta.get('agent_selection', 'legacy')}, "
             f"information_mode={meta.get('information_mode', 'pre_close_cutoff')}, exchange_mode={meta.get('exchange_mode', 'announced_price_binary')}",
         ],
         ["전체 에이전트", ", ".join(meta["agent_ids"])],

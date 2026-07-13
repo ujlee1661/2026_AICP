@@ -22,8 +22,7 @@ def build_trading_constraints(
     price_label: str = "공시가",
 ) -> dict[str, Any]:
     usable_cash = max(0.0, available_cash * max_single_trade_cash_ratio)
-    max_affordable_quantity = int(available_cash // current_price) if current_price > 0 else 0
-    max_buy_quantity = max_affordable_quantity
+    max_buy_quantity = int(usable_cash // current_price) if current_price > 0 else 0
     allowed_actions = []
     if max_buy_quantity >= min_order_unit:
         allowed_actions.append("buy")
@@ -40,7 +39,7 @@ def build_trading_constraints(
         "announced_price": current_price,
         "price_label": price_label,
         "min_order_unit": min_order_unit,
-        "max_affordable_quantity": max_affordable_quantity,
+        "max_affordable_quantity": max_buy_quantity,
         "max_buy_quantity": max_buy_quantity,
         "max_sell_quantity": current_quantity,
         "allow_hold": allow_hold,

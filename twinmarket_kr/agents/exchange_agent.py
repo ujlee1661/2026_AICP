@@ -55,7 +55,8 @@ class ExchangeAgent:
 
     @staticmethod
     def get_allowed_actions(portfolio: dict[str, Any], announced_price: float) -> list[str]:
-        can_buy = float(portfolio.get("cash", 0.0)) >= announced_price
+        max_buy_cash = float(portfolio.get("cash", 0.0)) * config.MAX_SINGLE_TRADE_CASH_RATIO
+        can_buy = max_buy_cash >= announced_price
         can_sell = int(portfolio.get("position", 0)) >= 1
         allowed = []
         if can_buy:
@@ -85,10 +86,12 @@ class ExchangeAgent:
             if order.quantity < 1:
                 raise ValueError(f"invalid quantity for {order.user_id}: {order.quantity}")
             if order.direction == "buy":
-                max_affordable = int(float(portfolio.get("cash", 0.0)) // announced_price)
-                if order.quantity > max_affordable:
+                max_buy_cash = float(portfolio.get("cash", 0.0)) * config.MAX_SINGLE_TRADE_CASH_RATIO
+                max_buy_quantity = int(max_buy_cash // announced_price)
+                if order.quantity > max_buy_quantity:
                     raise ValueError(
-                        f"buy quantity exceeds cash for {order.user_id}: {order.quantity} > {max_affordable}"
+                        f"buy quantity exceeds single-trade cash limit for {order.user_id}: "
+                        f"{order.quantity} > {max_buy_quantity}"
                     )
             else:
                 holding = int(portfolio.get("position", 0))

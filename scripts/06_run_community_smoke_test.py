@@ -114,7 +114,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run a small 2-day community simulation and bundle full logs.")
     parser.add_argument("--max-agents", type=int, default=3)
     parser.add_argument("--max-days", type=int, default=2)
-    parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--seed", type=int, default=config.RANDOM_SEED)
     parser.add_argument("--start-date", default=None)
     parser.add_argument("--end-date", default=None)
@@ -124,8 +123,6 @@ def main() -> None:
         default="pre_close_cutoff",
     )
     parser.add_argument("--decision-space", choices=("buy_sell_only",), default="buy_sell_only")
-    parser.add_argument("--random-agents", action="store_true")
-    parser.add_argument("--balanced-depths", action="store_true", default=True)
     parser.add_argument("--output-name", default="community_smoke_test_full_log.json")
     args = parser.parse_args()
 
@@ -133,15 +130,12 @@ def main() -> None:
         run_simulation(
             max_agents=args.max_agents,
             max_days=args.max_days,
-            concurrency=args.concurrency,
             enable_logs=True,
-            random_agents=args.random_agents,
             random_seed=args.seed,
             start_date=args.start_date,
             end_date=args.end_date,
             information_mode=args.information_mode,
             decision_space=args.decision_space,
-            balanced_depths=args.balanced_depths,
         )
     )
     run_dir = _latest_run_dir()

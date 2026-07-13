@@ -16,7 +16,7 @@
 - `data/fixed_slots.csv`가 없으면 코드가 고정 슬롯을 생성할 수 있다.
 - 기본 random seed는 `config.RANDOM_SEED = 2`이다.
 - `agents` 테이블은 `news_depth`를 가진다.
-- 현재 Depth 분포는 Depth 0/1/2를 지원하며, 실행 시 `--balanced-depths`로 균형 샘플링할 수 있다.
+- 기본 에이전트 선택은 `sys_100.db`의 앞에서부터 `max_agents`명을 자르는 방식이다. Depth 균형 샘플링 옵션은 사용하지 않는다.
 
 ## 뉴스
 

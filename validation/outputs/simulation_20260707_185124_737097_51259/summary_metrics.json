@@ -3,7 +3,7 @@
   "run_dir": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/outputs/logs/simulation_20260707_185124_737097_51259",
   "actual_value": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/validation/data_trading_value.csv",
   "actual_volume": "/Users/leeyujeong/Downloads/MD_File/twinmarket_kr_project/validation/data_trading_volume.csv",
-  "generated_at": "2026-07-10T18:18:23",
+  "generated_at": "2026-07-13T19:26:15",
   "information_mode": "pre_close_cutoff",
   "limit_only_orders": false,
   "skip_initial_days": 3,

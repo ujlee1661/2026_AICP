@@ -510,12 +510,12 @@ class NormalizedLineChart(Flowable):
         self.dates = dates
         self.series = series
         self.width = width
-        self.height = 52 * mm
+        self.height = 66 * mm
 
     def draw(self) -> None:
         c = self.canv
-        x0, y0 = 8 * mm, 8 * mm
-        w, h = self.width - 16 * mm, self.height - 18 * mm
+        x0, y0 = 8 * mm, 21 * mm
+        w, h = self.width - 16 * mm, self.height - 32 * mm
         c.setFont("Korean", 8)
         c.setFillColor(colors.HexColor("#1f2937"))
         c.drawString(x0, y0 + h + 7 * mm, self.title)
@@ -540,15 +540,25 @@ class NormalizedLineChart(Flowable):
             c.setFillColor(color)
             c.circle(points[-1][0], points[-1][1], 1.4, stroke=0, fill=1)
         legend_x = x0
+        legend_y = y0 + h - 5 * mm
         for name, _, color in self.series:
             c.setFillColor(color)
-            c.rect(legend_x, y0 - 4 * mm, 3 * mm, 3 * mm, stroke=0, fill=1)
+            c.rect(legend_x, legend_y, 3 * mm, 3 * mm, stroke=0, fill=1)
             c.setFillColor(colors.HexColor("#475569"))
-            c.drawString(legend_x + 4 * mm, y0 - 3.6 * mm, name)
+            c.drawString(legend_x + 4 * mm, legend_y + 0.4 * mm, name)
             legend_x += 35 * mm
         c.setFillColor(colors.HexColor("#64748b"))
-        c.drawString(x0, y0 - 9 * mm, self.dates[0])
-        c.drawRightString(x0 + w, y0 - 9 * mm, self.dates[-1])
+        c.setStrokeColor(colors.HexColor("#94a3b8"))
+        c.setLineWidth(0.3)
+        c.setFont("Korean", 5.4)
+        for idx, date in enumerate(self.dates):
+            x = x0 + (w * idx / max(1, len(self.dates) - 1))
+            c.line(x, y0, x, y0 - 1.5 * mm)
+            c.saveState()
+            c.translate(x - 0.8 * mm, y0 - 7.5 * mm)
+            c.rotate(45)
+            c.drawString(0, 0, date)
+            c.restoreState()
 
 
 def para(text: Any, style: ParagraphStyle) -> Paragraph:
