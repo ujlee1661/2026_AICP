@@ -4,6 +4,7 @@ import csv
 import pickle
 import random
 import re
+import sqlite3
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -80,6 +81,68 @@ def _select_daily(rows: list[dict[str, Any]], *, seed: int | None = None) -> lis
     if len(selected) < sum(CATEGORY_TARGETS.values()):
         remains = [row for row in rows if row["id"] not in used_ids]
         selected.extend(rng.sample(remains, min(sum(CATEGORY_TARGETS.values()) - len(selected), len(remains))))
+    return selected
+
+
+def _trading_dates_from_db(sim_db_path: Path | str = config.SIM_DB) -> list[str]:
+    path = Path(sim_db_path)
+    if not path.exists():
+        return []
+    with sqlite3.connect(path) as conn:
+        rows = conn.execute(
+            "SELECT date FROM StockData WHERE stock_id = ? ORDER BY date",
+            (config.STOCK_CODE,),
+        ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def _select_pre_close_cutoff_daily(
+    processed: list[dict[str, Any]],
+    *,
+    daily_seed: int | None = None,
+    sim_db_path: Path | str = config.SIM_DB,
+) -> list[dict[str, Any]]:
+    trading_dates = _trading_dates_from_db(sim_db_path)
+    if len(trading_dates) < 2:
+        return _select_by_calendar_day(processed, daily_seed=daily_seed)
+    previous_by_date = {
+        day: trading_dates[index - 1]
+        for index, day in enumerate(trading_dates)
+        if index > 0
+    }
+    selected: list[dict[str, Any]] = []
+    for day_index, day in enumerate(trading_dates[1:]):
+        previous_day = previous_by_date[day]
+        windows = [
+            ("am", previous_day, config.MARKET_CLOSE_TIME, day, "08:59"),
+            ("pm", day, "08:59", day, config.MARKET_CLOSE_TIME),
+        ]
+        for slot_index, (slot, start_date, start_time, end_date, end_time) in enumerate(windows):
+            candidates = [
+                row
+                for row in processed
+                if _in_datetime_window(
+                    row,
+                    start_date=start_date,
+                    start_time=start_time,
+                    end_date=end_date,
+                    end_time=end_time,
+                )
+            ]
+            seed = None if daily_seed is None else daily_seed + day_index * 2 + slot_index
+            selected.extend(_select_daily(candidates, seed=seed))
+    selected.sort(key=lambda row: (row["date"], row["time"], row["id"]))
+    return selected
+
+
+def _select_by_calendar_day(processed: list[dict[str, Any]], *, daily_seed: int | None = None) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    by_day: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in processed:
+        by_day[row["date"]].append(row)
+    for day_index, (_, rows) in enumerate(sorted(by_day.items())):
+        seed = None if daily_seed is None else daily_seed + day_index
+        selected.extend(_select_daily(rows, seed=seed))
     return selected
 
 
@@ -249,13 +312,7 @@ def prepare_news(
         for row in processed:
             writer.writerow({key: row[key] for key in writer.fieldnames or []})
 
-    selected = []
-    by_day: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in processed:
-        by_day[row["date"]].append(row)
-    for day_index, (_, rows) in enumerate(sorted(by_day.items())):
-        seed = None if daily_seed is None else daily_seed + day_index
-        selected.extend(_select_daily(rows, seed=seed))
+    selected = _select_pre_close_cutoff_daily(processed, daily_seed=daily_seed)
 
     with daily_path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["id", "title", "date", "time", "category"])
@@ -433,6 +490,7 @@ class NewsAgent:
 
     def build_base_context(self, target_date: str, news_depth: int = 1) -> dict[str, Any]:
         daily_titles = self.get_daily_titles(target_date)
+        daily_read_max = 0 if news_depth <= 0 else self._daily_read_limit(daily_titles)
         return {
             "news_depth": news_depth,
             "daily_titles": daily_titles,
@@ -440,7 +498,7 @@ class NewsAgent:
             "search_results": {},
             "search_read_contents": [],
             "limits": {
-                "daily_read_max": 0 if news_depth <= 0 else 10,
+                "daily_read_max": daily_read_max,
                 "search_fields_max": 0,
                 "search_read_max": 10 if news_depth >= 2 else 0,
                 "lookback_days": 7 if news_depth >= 2 else 0,
@@ -462,6 +520,7 @@ class NewsAgent:
             end_date=end_date,
             end_time=end_time,
         )
+        daily_read_max = 0 if news_depth <= 0 else self._daily_read_limit(daily_titles)
         return {
             "news_depth": news_depth,
             "daily_titles": daily_titles,
@@ -475,7 +534,7 @@ class NewsAgent:
                 "end_time": end_time,
             },
             "limits": {
-                "daily_read_max": 0 if news_depth <= 0 else 10,
+                "daily_read_max": daily_read_max,
                 "search_fields_max": 0,
                 "search_read_max": 10 if news_depth >= 2 else 0,
                 "lookback_days": 0,
@@ -495,10 +554,11 @@ class NewsAgent:
         if news_depth <= 0:
             read_contents: list[dict[str, str]] = []
         else:
+            daily_read_max = int((base_context.get("limits") or {}).get("daily_read_max") or len(daily_titles) or 10)
             read_contents = self.read_news(
                 ids=[str(row.get("id")) for row in daily_titles if row.get("id")],
                 allowed_ids=allowed_daily_ids,
-                max_items=10,
+                max_items=daily_read_max,
             )
 
         expanded = dict(base_context)
@@ -506,6 +566,16 @@ class NewsAgent:
         expanded.setdefault("search_results", {})
         expanded.setdefault("search_read_contents", [])
         return expanded
+
+    def _daily_read_limit(self, rows: list[dict[str, Any]]) -> int:
+        if not self.include_fake_news:
+            return min(10, len(rows))
+        fake_count = sum(
+            1
+            for row in rows
+            if _truthy((self._by_id.get(str(row.get("id") or "")) or {}).get("is_fake"))
+        )
+        return min(len(rows), 10 + fake_count)
 
     def _limit_window_fake_rows(self, rows: list[dict[str, str]]) -> list[dict[str, str]]:
         if not self.include_fake_news:
@@ -525,13 +595,6 @@ class NewsAgent:
             for index, row in enumerate(rows)
             if index == selected_index or not _truthy(row.get("is_fake"))
         ]
-        selected_current_index = without_other_fakes.index(selected_fake)
-        if selected_current_index >= 10:
-            return [
-                selected_fake,
-                *without_other_fakes[:selected_current_index],
-                *without_other_fakes[selected_current_index + 1:],
-            ]
         return without_other_fakes
 
     def fake_audit_for_context(

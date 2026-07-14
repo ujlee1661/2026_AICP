@@ -127,12 +127,15 @@ def _fake_rows(fake_pkl_path: Path, *, approved_only: bool = True) -> list[dict[
     rows = df.to_dict("records")
     result: list[dict[str, Any]] = []
     for raw in rows:
+        leakage_safe = raw.get("leakage_safe", raw.get("agent_visible_label_removed", True))
+        agent_visible_label_removed = raw.get("agent_visible_label_removed", True)
+        if bool(leakage_safe) is not True:
+            continue
+        if bool(agent_visible_label_removed) is not True:
+            continue
         if approved_only:
             final_approval = raw.get("final_approval", True)
-            leakage_safe = raw.get("leakage_safe", raw.get("agent_visible_label_removed", True))
             if bool(final_approval) is not True:
-                continue
-            if bool(leakage_safe) is not True:
                 continue
         date = _clean(raw.get("date"))
         title = _clean(raw.get("title"))
@@ -140,7 +143,7 @@ def _fake_rows(fake_pkl_path: Path, *, approved_only: bool = True) -> list[dict[
         search_summary = _clean(raw.get("summary") or daily_summary)
         time_text = _clean(raw.get("time"))
         replace_target_news_id = _clean(raw.get("replace_target_news_id"))
-        if not date or not title or not daily_summary or not time_text or not replace_target_news_id:
+        if not date or not title or not daily_summary or not time_text:
             continue
         row: dict[str, Any] = {
             "id": _public_news_id(raw),
@@ -152,8 +155,9 @@ def _fake_rows(fake_pkl_path: Path, *, approved_only: bool = True) -> list[dict[
             "is_fake": "true",
             "synthetic_id": _clean(raw.get("synthetic_id") or raw.get("fake_news_id")),
             "fake_news_id": _clean(raw.get("fake_news_id") or raw.get("synthetic_id")),
-            "replace_target_news_id": replace_target_news_id,
         }
+        if replace_target_news_id:
+            row["replace_target_news_id"] = replace_target_news_id
         if search_summary and search_summary != daily_summary:
             row["search_summary"] = search_summary
         for field in PRIVATE_FIELDS:
@@ -170,20 +174,16 @@ def _fake_rows(fake_pkl_path: Path, *, approved_only: bool = True) -> list[dict[
     return result
 
 
-def _replace_daily_rows(
+def _append_daily_rows(
     daily_rows: list[dict[str, Any]],
     fake_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    fake_by_target = {row["replace_target_news_id"]: row for row in fake_rows}
-    replaced_targets: set[str] = set()
-    result: list[dict[str, Any]] = []
-    for row in daily_rows:
-        target_id = _clean(row.get("id"))
-        fake = fake_by_target.get(target_id)
-        if not fake:
-            result.append(row)
-            continue
-        replaced_targets.add(target_id)
+    result: list[dict[str, Any]] = [*daily_rows]
+    existing_ids = {_clean(row.get("id")) for row in daily_rows}
+    duplicate_ids = [row["id"] for row in fake_rows if row["id"] in existing_ids]
+    if duplicate_ids:
+        raise ValueError(f"fake public ids collide with daily news ids: {duplicate_ids[:5]}")
+    for fake in fake_rows:
         result.append(
             {
                 key: fake.get(key, "")
@@ -198,37 +198,7 @@ def _replace_daily_rows(
                 if key != "summary"
             }
         )
-    missing_targets = sorted(set(fake_by_target) - replaced_targets)
-    if missing_targets:
-        raise ValueError(f"replace_target_news_id not found in daily csv: {missing_targets[:5]}")
-    return result
-
-
-def _event_manifest(event_pkl_path: Path | None) -> dict[str, Any]:
-    if event_pkl_path is None or not event_pkl_path.exists():
-        return {}
-    df = pd.read_pickle(event_pkl_path)
-    keep = [
-        "event_id",
-        "event_date",
-        "event_title",
-        "event_type",
-        "impact_direction",
-        "injection_dates",
-        "injection_start_date",
-        "injection_end_date",
-    ]
-    rows = []
-    for row in df.to_dict("records"):
-        item = {}
-        for field in keep:
-            value = row.get(field)
-            if isinstance(value, (list, tuple, set)):
-                item[field] = list(value)
-            else:
-                item[field] = _clean(value)
-        rows.append(item)
-    return {"event_count": len(rows), "events": rows}
+    return sorted(result, key=lambda row: (_clean(row.get("date")), _clean(row.get("time")), _clean(row.get("id"))))
 
 
 def prepare_fake_news_injection(
@@ -236,10 +206,10 @@ def prepare_fake_news_injection(
     processed_csv_path: Path,
     daily_csv_path: Path,
     fake_pkl_path: Path,
-    event_pkl_path: Path | None,
     output_processed_csv_path: Path,
     output_daily_csv_path: Path,
     manifest_path: Path,
+    variant: str,
     approved_only: bool = True,
 ) -> dict[str, Any]:
     processed = _read_csv(processed_csv_path)
@@ -252,7 +222,7 @@ def prepare_fake_news_injection(
         raise ValueError(f"fake public ids collide with existing news ids: {duplicate_ids[:5]}")
 
     processed_out = [*processed, *fake_rows]
-    daily_out = _replace_daily_rows(daily, fake_rows)
+    daily_out = _append_daily_rows(daily, fake_rows)
 
     _write_csv(
         output_processed_csv_path,
@@ -271,15 +241,15 @@ def prepare_fake_news_injection(
         "baseline_processed_csv": str(processed_csv_path),
         "baseline_daily_csv": str(daily_csv_path),
         "fake_pkl": str(fake_pkl_path),
-        "event_pkl": str(event_pkl_path) if event_pkl_path else "",
+        "variant": variant,
         "baseline_processed_count": len(processed),
         "baseline_daily_count": len(daily),
         "fake_count": len(fake_rows),
         "processed_count": len(processed_out),
         "daily_count": len(daily_out),
-        "replacement_mode": "replace_target_news_id",
+        "injection_mode": "append",
+        "agent_visible_fake_label_removed": True,
         "fake_by_date": {},
-        "events": _event_manifest(event_pkl_path),
     }
     for row in fake_rows:
         manifest["fake_by_date"].setdefault(row["date"], []).append(
@@ -300,28 +270,68 @@ def prepare_fake_news_injection(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build injection news CSVs from fake news pkl.")
+    parser.add_argument(
+        "--variant",
+        choices=("bearish", "bullish", "both"),
+        default="both",
+        help="Fake-news polarity set to build.",
+    )
     parser.add_argument("--processed-csv", type=Path, default=config.PROCESSED_NEWS_CSV)
     parser.add_argument("--daily-csv", type=Path, default=config.DAILY_NEWS_SELECTION_CSV)
-    parser.add_argument("--fake-pkl", type=Path, default=config.FAKE_NEWS_PKL)
-    parser.add_argument("--event-pkl", type=Path, default=config.EVENT_PKL)
-    parser.add_argument("--output-processed-csv", type=Path, default=config.PROCESSED_NEWS_INJECTION_CSV)
-    parser.add_argument("--output-daily-csv", type=Path, default=config.DAILY_NEWS_SELECTION_INJECTION_CSV)
+    parser.add_argument("--fake-pkl", type=Path, default=None)
+    parser.add_argument("--output-processed-csv", type=Path, default=None)
+    parser.add_argument("--output-daily-csv", type=Path, default=None)
     parser.add_argument("--manifest", type=Path, default=config.OUTPUT_DIR / "fake_news_injection_manifest.json")
-    parser.add_argument("--include-unapproved", action="store_true")
+    parser.add_argument(
+        "--approved-only",
+        action="store_true",
+        help="Require final_approval=true. By default phase-review rows are included when leakage-safe.",
+    )
+    parser.add_argument("--include-unapproved", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
-    manifest = prepare_fake_news_injection(
-        processed_csv_path=args.processed_csv,
-        daily_csv_path=args.daily_csv,
-        fake_pkl_path=args.fake_pkl,
-        event_pkl_path=args.event_pkl,
-        output_processed_csv_path=args.output_processed_csv,
-        output_daily_csv_path=args.output_daily_csv,
-        manifest_path=args.manifest,
-        approved_only=not args.include_unapproved,
-    )
-    print(json.dumps({k: v for k, v in manifest.items() if k != "fake_by_date" and k != "events"}, ensure_ascii=False, indent=2))
-    print(f"manifest={args.manifest}")
+    variants = ["bearish", "bullish"] if args.variant == "both" else [args.variant]
+    if args.variant == "both" and any([args.fake_pkl, args.output_processed_csv, args.output_daily_csv]):
+        raise ValueError("custom --fake-pkl/--output-* can only be used with a single --variant")
+
+    defaults = {
+        "bearish": (
+            config.FAKE_NEWS_BEARISH_PKL,
+            config.PROCESSED_NEWS_INJECTION_BEARISH_CSV,
+            config.DAILY_NEWS_SELECTION_INJECTION_BEARISH_CSV,
+        ),
+        "bullish": (
+            config.FAKE_NEWS_BULLISH_PKL,
+            config.PROCESSED_NEWS_INJECTION_BULLISH_CSV,
+            config.DAILY_NEWS_SELECTION_INJECTION_BULLISH_CSV,
+        ),
+    }
+
+    manifests = []
+    for variant in variants:
+        default_fake_pkl, default_processed_out, default_daily_out = defaults[variant]
+        manifest_path = (
+            args.manifest
+            if len(variants) == 1
+            else config.OUTPUT_DIR / f"fake_news_injection_manifest_{variant}.json"
+        )
+        manifest = prepare_fake_news_injection(
+            processed_csv_path=args.processed_csv,
+            daily_csv_path=args.daily_csv,
+            fake_pkl_path=args.fake_pkl or default_fake_pkl,
+            output_processed_csv_path=args.output_processed_csv or default_processed_out,
+            output_daily_csv_path=args.output_daily_csv or default_daily_out,
+            manifest_path=manifest_path,
+            variant=variant,
+            approved_only=args.approved_only and not args.include_unapproved,
+        )
+        manifests.append(manifest)
+        printable = {k: v for k, v in manifest.items() if k != "fake_by_date"}
+        print(json.dumps(printable, ensure_ascii=False, indent=2))
+        print(f"manifest={manifest_path}")
+
+    if len(manifests) > 1:
+        print(f"built_variants={','.join(variants)}")
 
 
 if __name__ == "__main__":

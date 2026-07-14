@@ -86,13 +86,19 @@ def main() -> None:
     parser.add_argument(
         "--use-fake-news-injection",
         action="store_true",
-        help="Use outputs/processed_news_injection.csv and outputs/daily_news_selection_injection.csv.",
+        help="Use the variant-specific fake-news injection CSVs.",
     )
     parser.add_argument(
         "--fake-news-mode",
         choices=("off", "on"),
         default=None,
         help="Control whether rows marked is_fake=true are visible to agents.",
+    )
+    parser.add_argument(
+        "--fake-news-variant",
+        choices=("bearish", "bullish"),
+        default="bearish",
+        help="Fake-news polarity set to use when fake-news-mode is on.",
     )
     parser.add_argument(
         "--community-mode",
@@ -111,8 +117,12 @@ def main() -> None:
     if fake_news_mode is None:
         fake_news_mode = "on" if args.use_fake_news_injection else "off"
     if args.use_fake_news_injection or fake_news_mode == "on":
-        processed_news_csv = processed_news_csv or str(config.PROCESSED_NEWS_INJECTION_CSV)
-        daily_news_csv = daily_news_csv or str(config.DAILY_NEWS_SELECTION_INJECTION_CSV)
+        if args.fake_news_variant == "bearish":
+            processed_news_csv = processed_news_csv or str(config.PROCESSED_NEWS_INJECTION_BEARISH_CSV)
+            daily_news_csv = daily_news_csv or str(config.DAILY_NEWS_SELECTION_INJECTION_BEARISH_CSV)
+        else:
+            processed_news_csv = processed_news_csv or str(config.PROCESSED_NEWS_INJECTION_BULLISH_CSV)
+            daily_news_csv = daily_news_csv or str(config.DAILY_NEWS_SELECTION_INJECTION_BULLISH_CSV)
     asyncio.run(
         run_simulation(
             max_agents=args.max_agents,
@@ -126,6 +136,7 @@ def main() -> None:
             processed_news_csv=processed_news_csv,
             daily_news_csv=daily_news_csv,
             fake_news_mode=fake_news_mode,
+            fake_news_variant=args.fake_news_variant if fake_news_mode == "on" else None,
             community_mode=args.community_mode,
             sim_db=args.sim_db,
         )

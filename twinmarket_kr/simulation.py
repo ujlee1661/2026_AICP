@@ -124,6 +124,7 @@ async def run_simulation(
     processed_news_csv: Path | str | None = None,
     daily_news_csv: Path | str | None = None,
     fake_news_mode: str = "off",
+    fake_news_variant: str | None = None,
     community_mode: str | None = None,
     sim_db: Path | str | None = None,
 ) -> None:
@@ -133,6 +134,8 @@ async def run_simulation(
         raise ValueError("decision_space must be 'buy_sell_only'")
     if fake_news_mode not in {"off", "on"}:
         raise ValueError("fake_news_mode must be 'off' or 'on'")
+    if fake_news_variant is not None and fake_news_variant not in {"bearish", "bullish"}:
+        raise ValueError("fake_news_variant must be 'bearish', 'bullish', or None")
     if community_mode is None:
         community_mode = "on" if config.ENABLE_COMMUNITY else "off"
     if community_mode not in {"off", "on"}:
@@ -201,6 +204,7 @@ async def run_simulation(
                 "processed_news_csv": str(processed_news_path),
                 "daily_news_csv": str(daily_news_path),
                 "fake_news_mode": fake_news_mode,
+                "fake_news_variant": fake_news_variant if fake_news_mode == "on" else None,
                 "community_mode": community_mode,
                 "community_posting": bool(community_enabled and config.ENABLE_COMMUNITY_POSTING),
                 "community_reading": bool(community_enabled and config.ENABLE_COMMUNITY_READING),
