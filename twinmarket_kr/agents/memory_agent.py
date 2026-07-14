@@ -434,5 +434,5 @@ class MemoryAgent:
 
 
 def load_agents_from_sys100(sys100_db: Path | str = config.SYS_100_DB) -> list[dict[str, Any]]:
-    with connect(sys100_db) as conn:
+    with connect(sys100_db, read_only=True) as conn:
         return [dict(row) for row in conn.execute("SELECT * FROM agents ORDER BY agent_id").fetchall()]

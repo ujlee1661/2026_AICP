@@ -127,6 +127,9 @@ async def run_simulation(
     fake_news_variant: str | None = None,
     community_mode: str | None = None,
     sim_db: Path | str | None = None,
+    reset_runtime_tables: bool = True,
+    log_root: Path | str | None = None,
+    log_run_id: str | None = None,
 ) -> None:
     if information_mode not in {"pre_close_cutoff", "same_day", "prior_close"}:
         raise ValueError("information_mode must be 'pre_close_cutoff', 'same_day', or 'prior_close'")
@@ -167,7 +170,8 @@ async def run_simulation(
     if not dates:
         raise RuntimeError("No StockData rows found. Run scripts/03_load_stock_data.py first.")
 
-    _reset_runtime_tables(sim_db_path)
+    if reset_runtime_tables:
+        _reset_runtime_tables(sim_db_path)
     memory = MemoryAgent(sim_db_path)
     fundamental = FundamentalAgent(sim_db_path)
     news = NewsAgent(
@@ -184,6 +188,8 @@ async def run_simulation(
     db_write_lock = asyncio.Lock()
     logger = (
         SimulationLogger(
+            root_dir=log_root or config.LOG_DIR,
+            run_id=log_run_id,
             metadata={
                 "max_agents": max_agents,
                 "max_days": max_days,
